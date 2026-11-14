@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.4 – 14.11.2026
+
+- Bluetooth: Hatte das Modul keinen Kanal FFE1, schrieb die App ihre Befehle
+  in den ersten beschreibbaren Kanal – oft der Gerätename – und lauschte
+  womöglich auf einem Standardkanal. Jetzt lauscht sie auf allen Datenkanälen
+  und schreibt nie in Standarddienste.
+- Diagnose zeigt beim Bluetooth-Verbinden alle Dienste und Kanäle des Moduls,
+  und Verbindungsfehler stehen dort auch.
+
 ## 1.0.3 – 14.11.2026
 
 - Schaltet das Gerät am Ende selbst ab, gilt der Test jetzt bis 6 % über der

@@ -212,6 +212,8 @@ class Fenster(QMainWindow):
         def verbinden():
             try:
                 v = verbindung.oeffnen(a)
+                for zeile in v.info:
+                    self.b.roh.emit("i", zeile.encode())
                 g = Geraet(v, bei_roh=lambda r, d: self.b.roh.emit(r, d))
                 try:
                     g.erkennen()
@@ -221,6 +223,7 @@ class Fenster(QMainWindow):
                 self.b.verbunden.emit(g, "")
             except Exception as e:
                 log.exception("Verbinden")
+                self.b.roh.emit("i", f"Fehler: {e}".encode())
                 self.b.verbunden.emit(None, str(e))
 
         threading.Thread(target=verbinden, daemon=True).start()
@@ -845,7 +848,8 @@ class Fenster(QMainWindow):
         return w
 
     def _roh(self, richtung: str, daten: bytes) -> None:
-        self.diag.appendPlainText(f"{datetime.now():%H:%M:%S.%f}"[:-3] + f" {richtung} {hex_text(daten)}")
+        inhalt = daten.decode(errors="replace") if richtung == "i" else hex_text(daten)
+        self.diag.appendPlainText(f"{datetime.now():%H:%M:%S.%f}"[:-3] + f" {richtung} {inhalt}")
 
     # ==================================================================
     def _frage(self, titel: str, text: str) -> bool:

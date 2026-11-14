@@ -41,6 +41,7 @@ class Anschluss:
 
 class Verbindung:
     def __init__(self) -> None:
+        self.info: list[str] = []        # Textzeilen für den Diagnose-Reiter
         self.bei_daten: Callable[[bytes], None] | None = None
         self.bei_ende: Callable[[str], None] | None = None
 
@@ -198,6 +199,17 @@ def ble_suchen(dauer: float = 6.0) -> list[Anschluss]:
     return [a for *_, a in aus]
 
 
+def _standard(uuid: str) -> bool:
+    """Von der Bluetooth-Norm festgelegte Dienste (Gerätename, Akku, …): 0x18xx."""
+    u = uuid.lower()
+    return u.endswith("-0000-1000-8000-00805f9b34fb") and u[4:6] == "18"
+
+
+def _kurz(uuid: str) -> str:
+    u = uuid.lower()
+    return u[4:8].upper() if u.endswith("-0000-1000-8000-00805f9b34fb") and u.startswith("0000") else u
+
+
 class Bluetooth(Verbindung):
     def __init__(self, adresse: str) -> None:
         super().__init__()
@@ -205,6 +217,14 @@ class Bluetooth(Verbindung):
         self._client = None
         self._schreib = None
         self._getrennt_gewollt = False
+        self.info: list[str] = []
+        self._quellen: set[str] = set()
+
+    def _von(self, uuid: str, daten: bytes) -> None:
+        if uuid not in self._quellen:          # einmal sagen, woher die Daten kommen
+            self._quellen.add(uuid)
+            log.info("BLE: erste Daten über %s", uuid)
+        self._empfangen(daten)
 
     def oeffnen(self) -> None:
         from bleak import BleakClient
@@ -216,21 +236,34 @@ class Bluetooth(Verbindung):
         async def verbinden():
             client = BleakClient(self.adresse, disconnected_callback=getrennt)
             await client.connect(timeout=15)
-            # FFE1 nehmen, wenn es da ist; sonst die erste, die melden kann
-            melden = schreiben = None
+            # Alles auflisten, was das Modul anbietet - landet im Diagnose-Reiter.
+            # Auf jeder Eigenschaft lauschen, die melden kann: welche der DL24
+            # wirklich benutzt, ist je nach Modul verschieden.
+            melden, schreiben = [], None
             for dienst in client.services:
+                self.info.append(f"Dienst {_kurz(dienst.uuid)}" + (" (Standard)" if _standard(dienst.uuid) else ""))
                 for e in dienst.characteristics:
-                    if e.uuid.lower() == BLE_EIGENSCHAFT:
-                        melden = schreiben = e
-                    if melden is None and "notify" in e.properties:
-                        melden = e
-                    if schreiben is None and ("write-without-response" in e.properties or "write" in e.properties):
+                    self.info.append(f"   Eigenschaft {_kurz(e.uuid)}: {', '.join(e.properties)}")
+                    if _standard(dienst.uuid):
+                        continue          # Gerätename, Akku usw. - nie hineinschreiben
+                    if "notify" in e.properties or "indicate" in e.properties:
+                        melden.append(e)
+                    kann_schreiben = "write-without-response" in e.properties or "write" in e.properties
+                    if kann_schreiben and (schreiben is None or e.uuid.lower() == BLE_EIGENSCHAFT):
                         schreiben = e
-            if melden is None:
+            if not melden:
                 await client.disconnect()
-                raise VerbindungsFehler("Das Gerät bietet keine Bluetooth-Eigenschaft zum Melden an.")
-            log.info("BLE: melden über %s, schreiben über %s", melden.uuid, schreiben and schreiben.uuid)
-            await client.start_notify(melden, lambda _h, d: self._empfangen(bytes(d)))
+                raise VerbindungsFehler("Das Gerät bietet keine Bluetooth-Eigenschaft zum Melden an.\n\n"
+                                        + "\n".join(self.info))
+            for e in melden:
+                try:
+                    await client.start_notify(e, lambda _h, d, u=_kurz(e.uuid): self._von(u, bytes(d)))
+                    self.info.append(f"lausche auf {_kurz(e.uuid)}")
+                except Exception as fehler:
+                    self.info.append(f"lauschen auf {_kurz(e.uuid)} ging nicht: {fehler}")
+            self.info.append(f"schreibe auf {_kurz(schreiben.uuid) if schreiben else '– (keine gefunden)'}")
+            for zeile in self.info:
+                log.info("BLE: %s", zeile)
             return client, schreiben
 
         try:
