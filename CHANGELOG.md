@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.6 – 14.11.2026
+
+- Sendet das Gerät Daten in einem Format, das die App nicht kennt, bleibt sie
+  jetzt verbunden statt zu trennen, und sagt das oben an.
+- Die empfangenen Rohdaten stehen zusätzlich in der Logdatei.
+
 ## 1.0.5 – 14.11.2026
 
 - Bluetooth: „Device … was not found“ beim Verbinden. Die App suchte das Gerät

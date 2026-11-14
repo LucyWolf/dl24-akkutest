@@ -49,7 +49,7 @@ class SimDL24:
 
     def __init__(self, akku: SimAkku, protokoll="px100", tempo=1.0, bericht_s=1.0):
         self.akku = akku
-        self.protokoll = protokoll        # "px100": beides, "atorch": nur Berichte
+        self.protokoll = protokoll        # "px100": beides, "atorch": nur Berichte, "fremd": unbekannt
         self.tempo = tempo
         self.bericht_s = bericht_s
         self.an = False
@@ -164,7 +164,8 @@ class SimDL24:
                 naechster_bericht = jetzt + self.bericht_s
                 senden = self.senden          # kann beim Trennen gerade None werden
                 if senden:
-                    paket = self.bericht()
+                    # "fremd": ein Gerät, dessen Format die App nicht kennt
+                    paket = b"\xaa\x55\x01" + bytes(range(30)) if self.protokoll == "fremd" else self.bericht()
                     # wie über Bluetooth: in Stücken zu 20 Byte
                     for i in range(0, len(paket), 20):
                         senden(paket[i:i + 20])

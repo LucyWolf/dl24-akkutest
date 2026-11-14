@@ -165,6 +165,32 @@ def test_zu_tiefe_abschaltung_wird_abgelehnt():
     f.close()
 
 
+def test_unbekanntes_format_bleibt_verbunden():
+    import logging
+    SimulatorVerbindung.voreinstellung = {"tempo": 10, "bericht_s": 0.1, "protokoll": "fremd"}
+    zeilen = []
+    h = logging.Handler()
+    h.emit = lambda r: zeilen.append(r.getMessage())
+    logging.getLogger().addHandler(h)
+    logging.getLogger().setLevel(logging.INFO)
+    f = fenster.Fenster(Speicher())
+    f.anschluss.setCurrentIndex(f.anschluss.count() - 1)
+    meldungen.clear()
+    f.verbinden_umschalten()
+    assert warten(lambda: f.geraet is not None, 20), meldungen
+    assert "Format unbekannt" in f.status.text(), f.status.text()
+    assert not f.knopf_start.isEnabled()
+    assert meldungen and "Logdatei" in meldungen[0], meldungen
+    assert any(z.startswith("< AA 55 01") for z in zeilen), zeilen[:5]
+    time = __import__("time")
+    time.sleep(0.5)
+    app.processEvents()
+    assert f.geraet is not None, "Verbindung muss bestehen bleiben"
+    logging.getLogger().removeHandler(h)
+    f.trennen()
+    f.close()
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

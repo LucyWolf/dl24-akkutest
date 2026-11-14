@@ -92,6 +92,8 @@ class Geraet:
         self._entwirrer = Entwirrer()
         self._antworten: queue.Queue = queue.Queue()
         self._atorch_gesehen = 0
+        self._empfangen_bytes = 0
+        self._roh_im_log = 0
         self._sperre = threading.Lock()            # eine Frage zur Zeit
         self._laeuft = False
         self.antwortzeit = 0.8
@@ -105,6 +107,12 @@ class Geraet:
 
     # ---- hinein ----
     def _daten(self, daten: bytes) -> None:
+        self._empfangen_bytes += len(daten)
+        # Die ersten paar hundert Stücke auch in die Logdatei: die lässt sich
+        # leichter verschicken als der Diagnose-Reiter
+        if self._roh_im_log < 300:
+            self._roh_im_log += 1
+            log.info("< %s", p.hex_text(daten))
         if self.bei_roh:
             self.bei_roh("<", daten)
         for art, inhalt in self._entwirrer.hinein(daten):
@@ -159,6 +167,13 @@ class Geraet:
         if self._atorch_gesehen:
             self.protokoll = "atorch"
             log.info("Gerät schickt Atorch-Berichte, antwortet aber nicht auf PX100")
+            return self.protokoll
+        if self._empfangen_bytes:
+            # Es kommt etwas an, nur in einem Format, das wir nicht kennen.
+            # Verbunden bleiben und mitschreiben - daraus lässt sich das Format
+            # nachbauen. Trennen hilft niemandem.
+            self.protokoll = "unbekannt"
+            log.warning("Gerät sendet %d Bytes in unbekanntem Format - bleibe verbunden", self._empfangen_bytes)
             return self.protokoll
         raise VerbindungsFehler(
             "Das Gerät antwortet nicht.\n\n"

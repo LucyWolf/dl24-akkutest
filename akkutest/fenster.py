@@ -239,6 +239,14 @@ class Fenster(QMainWindow):
         g.bei_fehler = lambda t: self.b.fehler.emit(t)
         g.starten()
         self._zustand_zeigen()
+        if g.protokoll == "unbekannt":
+            QMessageBox.information(
+                self, "Verbunden",
+                "Der DL24 ist verbunden und sendet Daten – aber in einem Format, das die App noch "
+                "nicht kennt. Messen und Testen gehen deshalb noch nicht.\n\n"
+                "Die Verbindung bleibt bestehen, und alles, was ankommt, wird in die Logdatei "
+                f"geschrieben:\n{datenordner() / 'akkutest.log'}\n\n"
+                "Lass sie ein paar Sekunden laufen und schick die Datei – damit wird das Format eingebaut.")
 
     def trennen(self) -> None:
         if self.ablauf and self.ablauf.laeuft:
@@ -270,14 +278,18 @@ class Fenster(QMainWindow):
         self.anschluss.setEnabled(not g)
         self.knopf_ble.setEnabled(not g)
         if g:
-            art = "fernsteuerbar (PX100)" if g.kann_steuern else "nur Messwerte (Atorch-Bericht)"
-            self.status.setText(f"✔ verbunden – {art}")
+            if g.protokoll == "unbekannt":
+                self.status.setText("✔ verbunden – Format unbekannt (Daten werden mitgeschrieben)")
+            else:
+                art = "fernsteuerbar (PX100)" if g.kann_steuern else "nur Messwerte (Atorch-Bericht)"
+                self.status.setText(f"✔ verbunden – {art}")
         else:
             self.status.setText("nicht verbunden")
         laeuft = bool(self.ablauf and self.ablauf.laeuft)
-        self.knopf_start.setEnabled(bool(g) and not laeuft)
+        bekannt = bool(g) and g.protokoll != "unbekannt"
+        self.knopf_start.setEnabled(bekannt and not laeuft)
         self.knopf_abbruch.setEnabled(laeuft)
-        self.knopf_erkennen.setEnabled(bool(g) and not laeuft)
+        self.knopf_erkennen.setEnabled(bekannt and not laeuft)
         for w in (self.akku_wahl, self.name, self.modell, self.typ, self.zellen, self.nenn, self.strom, self.abschalt):
             w.setEnabled(not laeuft)
         self.diag_info.setText(
