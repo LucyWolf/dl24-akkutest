@@ -56,7 +56,7 @@ def verbinden(f, protokoll):
 
 def test_ganzer_ablauf():
     SimulatorVerbindung.voreinstellung = {"akku": SimAkku("liion", 1, mah=2700, innen_mohm=38),
-                                          "tempo": 1500, "bericht_s": 0.02}
+                                          "tempo": 300, "bericht_s": 0.02}
     sp = Speicher()
     f = fenster.Fenster(sp)
     f.show()
@@ -130,7 +130,7 @@ def test_ganzer_ablauf():
 
 def test_geraet_ohne_fernsteuerung():
     SimulatorVerbindung.voreinstellung = {"akku": SimAkku("nimh", 4, mah=1900, innen_mohm=30),
-                                          "tempo": 1500, "bericht_s": 0.02, "protokoll": "atorch"}
+                                          "tempo": 300, "bericht_s": 0.02, "protokoll": "atorch"}
     f = fenster.Fenster(Speicher())
     f.show()
     verbinden(f, "atorch")

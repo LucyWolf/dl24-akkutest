@@ -1,6 +1,16 @@
 # Changelog
 
-## 1.0.7 – 14.11.2026
+## 1.0.8 – 14.11.2026
+
+- Enthält 1.0.7, die nie gebaut wurde.
+- Die Live-Kurve konnte einen Fehler werfen, wenn gerade ein neuer Messwert
+  ankam (x- und y-Werte verschieden lang).
+- Lücken zwischen Messwerten (Bluetooth-Aussetzer) werden bei der Kapazität
+  mitgezählt statt verschluckt.
+- Ferngesteuerter Test: Schaltet das Gerät an der von der App gesetzten
+  Grenze selbst ab, gilt der Test als vollständig.
+
+## 1.0.7 – 14.11.2026 (nicht veröffentlicht)
 
 - DL24 mit 2,4"-Farbdisplay wird erkannt. Er schickt die üblichen
   Atorch-Berichte, aber als Prüfsumme immer 23 – die App hat deshalb jeden

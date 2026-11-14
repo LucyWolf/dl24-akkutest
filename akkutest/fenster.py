@@ -587,8 +587,11 @@ class Fenster(QMainWindow):
             a["zeit"].setzen(dauer_text(r.dauer_s))
             p = r.prozent(ab.einstellung.nenn_mah)
             a["proz"].setzen(f"{p:.0f} %" if p is not None and ab.zustand == "fertig" else "–")
-            if ab.punkte:
-                self.kurve_linie.setData([x[0] / 60 for x in ab.punkte], [x[1] for x in ab.punkte])
+            # Momentaufnahme: der Gerätefaden hängt währenddessen weiter an,
+            # sonst sind x und y verschieden lang
+            punkte = list(ab.punkte)
+            if punkte:
+                self.kurve_linie.setData([x[0] / 60 for x in punkte], [x[1] for x in punkte])
 
     def _ereignis(self, art: str, text: str) -> None:
         if art == "fertig":

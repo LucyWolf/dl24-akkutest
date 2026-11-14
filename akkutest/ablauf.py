@@ -144,7 +144,9 @@ class Ablauf:
         v = self._vorher
         if v is not None:
             dt = m.zeit - v.zeit
-            if 0 < dt < 120:
+            # Auch über Lücken (Bluetooth-Aussetzer) weiterzählen: bei konstantem
+            # Strom stimmt die Fläche trotzdem, Auslassen würde mAh verschlucken
+            if dt > 0:
                 erg.mah += (v.strom + m.strom) / 2 * dt / 3.6
                 erg.wh += (v.leistung + m.leistung) / 2 * dt / 3600
         self._vorher = m
@@ -197,6 +199,11 @@ class Ablauf:
                 # Am Ende fällt die Spannung steil: der letzte Wert vor dem Abschalten
                 # kann je nach Strom und Takt ein gutes Stück über der Grenze liegen
                 fast_leer = self._min_v is not None and self._min_v <= e.abschalt_v * 1.06
+                # Haben wir die Abschaltspannung selbst ans Gerät gegeben und es hat
+                # von sich aus aufgehört, war es genau diese Grenze - auch wenn der
+                # letzte Messwert vor dem steilen Abfall noch höher lag
+                if self.steuerbar and self._min_v is not None and self._min_v <= e.abschalt_v * 1.25:
+                    fast_leer = True
                 self._beenden("Gerät hat bei der Abschaltspannung beendet" if fast_leer
                               else "Last wurde vorzeitig ausgeschaltet", vollstaendig=fast_leer)
         else:
