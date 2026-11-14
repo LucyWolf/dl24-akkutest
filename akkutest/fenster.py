@@ -41,6 +41,13 @@ def protokoll_einrichten() -> Path:
     return pfad
 
 
+def gedaempft() -> str:
+    """Graue Nebenschrift, die in hellem und dunklem Design lesbar bleibt:
+    die normale Schriftfarbe, halb durchsichtig."""
+    c = QApplication.palette().windowText().color()
+    return f"color: rgba({c.red()}, {c.green()}, {c.blue()}, 0.62);"
+
+
 def dauer_text(s: float) -> str:
     s = int(s)
     return f"{s // 3600}:{s % 3600 // 60:02d}:{s % 60:02d}"
@@ -71,7 +78,7 @@ class Anzeige(QFrame):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(10, 6, 10, 6)
         t = QLabel(titel)
-        t.setStyleSheet("color: palette(mid); font-size: 11px;")
+        t.setStyleSheet(gedaempft() + " font-size: 11px;")
         self.wert = QLabel("–")
         f = QFont()
         f.setPointSize(17)
@@ -320,7 +327,7 @@ class Fenster(QMainWindow):
         f.addRow("", self.knopf_erkennen)
         self.typ_hinweis = QLabel()
         self.typ_hinweis.setWordWrap(True)
-        self.typ_hinweis.setStyleSheet("color: palette(mid);")
+        self.typ_hinweis.setStyleSheet(gedaempft())
         f.addRow(self.typ_hinweis)
         links.addWidget(gruppe)
 
@@ -384,7 +391,10 @@ class Fenster(QMainWindow):
         self.kurve_bild.setLabel("bottom", "Zeit (min)")
         self.kurve_linie = self.kurve_bild.plot([], [], pen=pg.mkPen("#2f80ed", width=2))
         self.grenz_linie = pg.InfiniteLine(angle=0, pen=pg.mkPen("#d03b3b", width=1, style=Qt.DashLine))
+        self.grenz_linie.hide()            # erst beim Test, sonst zieht sie die Achse auf 0
         self.kurve_bild.addItem(self.grenz_linie)
+        self.kurve_bild.setYRange(0, 5)
+        self._ohne_vorsatz(self.kurve_bild)
         rechts.addWidget(self.kurve_bild, 1)
         self.ergebnis = QLabel()
         self.ergebnis.setWordWrap(True)
@@ -526,6 +536,8 @@ class Fenster(QMainWindow):
         self.ergebnis.hide()
         self.banner.hide()
         self.grenz_linie.setValue(e.abschalt_v)
+        self.grenz_linie.show()
+        self.kurve_bild.enableAutoRange()
         self.kurve_linie.setData([], [])
         log.info("Test gestartet: %s", e)
         self._zustand_zeigen()
@@ -654,6 +666,7 @@ class Fenster(QMainWindow):
         self.verlauf_bild.setLabel("left", "Kapazität (mAh)")
         self.verlauf_bild.setAxisItems({"bottom": pg.DateAxisItem()})
         self.verlauf_bild.setTitle("Kapazität über die Zeit")
+        self.verlauf_bild.getAxis("left").enableAutoSIPrefix(False)
         bilder.addWidget(self.verlauf_bild)
         self.test_bild = pg.PlotWidget()
         self.test_bild.setBackground(None)
@@ -661,6 +674,7 @@ class Fenster(QMainWindow):
         self.test_bild.setLabel("left", "Spannung (V)")
         self.test_bild.setLabel("bottom", "entnommen (mAh)")
         self.test_bild.setTitle("Entladekurven (gewählter Test hervorgehoben)")
+        self._ohne_vorsatz(self.test_bild)
         bilder.addWidget(self.test_bild)
         unten.addWidget(bilder)
         unten.setSizes([520, 600])
@@ -668,6 +682,12 @@ class Fenster(QMainWindow):
         teiler.setSizes([260, 440])
         lay.addWidget(teiler)
         return w
+
+    @staticmethod
+    def _ohne_vorsatz(bild) -> None:
+        """Keine Vorsätze wie x0.001 oder k an den Achsen."""
+        for achse in ("left", "bottom"):
+            bild.getAxis(achse).enableAutoSIPrefix(False)
 
     @staticmethod
     def _tabelle(spalten: list[str]) -> QTableWidget:

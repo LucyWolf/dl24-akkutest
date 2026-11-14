@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.2 – 14.11.2026
+
+- Im dunklen Windows-Design waren die Beschriftungen über den Messwerten und
+  der Hinweis zum Akkutyp kaum zu sehen
+- Leere Spannungskurve zeigte −400 bis 400 und „x0.001“ an der Achse
+
 ## 1.0.1 – 14.11.2026
 
 Erste veröffentlichte Fassung. 1.0.0 wurde nie gebaut: ein Test las das
