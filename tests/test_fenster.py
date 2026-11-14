@@ -84,7 +84,8 @@ def test_ganzer_ablauf():
     assert warten(lambda: len(f.ablauf.punkte) > 20, 10)
     foto(f, "2-laeuft")
     assert warten(lambda: not f.ablauf.laeuft, 60), f.ablauf.zustand
-    app.processEvents()
+    # Das Fenster erfährt das Ende per Signal aus dem Gerätefaden - erst danach steht das Ergebnis da
+    assert warten(lambda: f.ergebnis.isVisible() and f.knopf_start.isEnabled(), 10)
     r = f.ablauf.ergebnis
     print("Ergebnis:", r)
     assert r.vollstaendig and 2400 < r.mah < 2710
@@ -103,9 +104,7 @@ def test_ganzer_ablauf():
     assert warten(lambda: f.geraet is None)
     verbinden(f, "px100")
     f.starten(nachfragen=False)
-    assert warten(lambda: not f.ablauf.laeuft, 60)
-    app.processEvents()
-    assert "Seit dem ersten Test" in f.ergebnis.text()
+    assert warten(lambda: "Seit dem ersten Test" in f.ergebnis.text(), 60), f.ergebnis.text()
     f.reiter.setCurrentIndex(1)
     app.processEvents()
     assert f.akku_tabelle.rowCount() == 1
@@ -145,8 +144,7 @@ def test_geraet_ohne_fernsteuerung():
     # Mensch am Gerät
     dev = f.geraet.v.geraet
     dev.soll_a, dev.abschalt_v, dev.an = 0.5, 4.0, True
-    assert warten(lambda: not f.ablauf.laeuft, 60)
-    app.processEvents()
+    assert warten(lambda: not f.ablauf.laeuft and f.ergebnis.isVisible(), 60)
     assert f.ablauf.ergebnis.vollstaendig, f.ablauf.ergebnis.grund
     assert 1700 < f.ablauf.ergebnis.mah < 1910
     f.trennen()

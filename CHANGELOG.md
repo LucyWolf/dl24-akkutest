@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.1 – 14.11.2026
+
+Erste veröffentlichte Fassung. 1.0.0 wurde nie gebaut: ein Test las das
+Ergebnis, bevor das Fenster es angezeigt hatte, und brach den Bau ab.
+
 ## 1.0.0 – 14.11.2026
 
 Erste Fassung.
