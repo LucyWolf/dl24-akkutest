@@ -135,6 +135,8 @@ def test_geraet_ohne_fernsteuerung():
     f.show()
     verbinden(f, "atorch")
     assert "nur Messwerte" in f.status.text()
+    assert warten(lambda: f.anz["u"].wert.text().count(",") == 1)
+    assert len(f.anz["u"].wert.text().split(",")[1]) == len("3 V"), f.anz["u"].wert.text()   # eine Nachkommastelle
     f.typ.setCurrentIndex(f.typ.findData("nimh"))
     f.zellen.setValue(4)
     f.nenn.setValue(1900)

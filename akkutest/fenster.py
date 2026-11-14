@@ -575,7 +575,10 @@ class Fenster(QMainWindow):
     def _messwert(self, m: Messwert) -> None:
         self.letzter = m
         a = self.anz
-        a["u"].setzen(zahl(m.spannung, 3, "V"))
+        # Im Atorch-Bericht kommt die Spannung nur in 0,1-V-Schritten - drei
+        # Nachkommastellen täuschten eine Genauigkeit vor, die es nicht gibt
+        fein = bool(self.geraet and self.geraet.kann_steuern)
+        a["u"].setzen(zahl(m.spannung, 3 if fein else 1, "V"))
         a["i"].setzen(zahl(m.strom, 3, "A"))
         a["p"].setzen(zahl(m.leistung, 2, "W"))
         a["t"].setzen(zahl(m.temperatur, 0, "°C") if m.temperatur is not None else "–")

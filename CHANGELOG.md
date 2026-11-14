@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.10 – 14.11.2026
+
+- Geräte, die nur Messwerte schicken (Atorch-Bericht), übertragen die
+  Spannung in 0,1-V-Schritten. Die Anzeige zeigt dann eine Nachkommastelle
+  statt „4,300 V“, was eine Genauigkeit vorgetäuscht hat, die es nicht gibt.
+
 ## 1.0.9 – 14.11.2026
 
 - Enthält 1.0.7 und 1.0.8, die nie gebaut wurden.
