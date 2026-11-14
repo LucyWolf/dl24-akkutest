@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.5 – 14.11.2026
+
+- Bluetooth: „Device … was not found“ beim Verbinden. Die App suchte das Gerät
+  beim Verbinden ein zweites Mal über die Adresse; sendete das Modul gerade
+  nicht, schlug das fehl. Jetzt nimmt sie das Gerät aus der Suche und sucht
+  bei einem Fehlschlag einmal neu. Findet sie es dann auch nicht, sagt sie,
+  was zu tun ist.
+
 ## 1.0.4 – 14.11.2026
 
 - Bluetooth: Hatte das Modul keinen Kanal FFE1, schrieb die App ihre Befehle

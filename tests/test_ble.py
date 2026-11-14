@@ -21,9 +21,12 @@ class D:
 
 class FalscherClient:
     letzter = None
+    scheitern = 0
+    ziele = []
 
     def __init__(self, adresse, disconnected_callback=None):
         FalscherClient.letzter = self
+        FalscherClient.ziele.append(adresse)
         self.lauscht, self.geschrieben = {}, []
         # Gerätename beschreibbar (darf nie benutzt werden), Daten auf FFF1, Schreiben auf FFF2
         self.services = [D("1800", [E("2a00", ["read", "write"])]),
@@ -31,7 +34,9 @@ class FalscherClient:
                          D("fff0", [E("fff1", ["notify"]), E("fff2", ["write-without-response"])])]
 
     async def connect(self, timeout):
-        pass
+        if FalscherClient.scheitern:
+            FalscherClient.scheitern -= 1
+            raise OSError("Device with address AA:BB was not found.")
 
     async def start_notify(self, e, rueckruf):
         self.lauscht[e.uuid[4:8]] = rueckruf
@@ -43,7 +48,15 @@ class FalscherClient:
         pass
 
 
-sys.modules["bleak"] = types.SimpleNamespace(BleakClient=FalscherClient)
+class FalscherScanner:
+    gefunden = "frisch gefunden"
+
+    @staticmethod
+    async def find_device_by_address(adresse, timeout):
+        return FalscherScanner.gefunden
+
+
+sys.modules["bleak"] = types.SimpleNamespace(BleakClient=FalscherClient, BleakScanner=FalscherScanner)
 from akkutest.verbindung import Bluetooth  # noqa: E402
 
 
@@ -65,6 +78,29 @@ def test_alle_kanaele_und_nie_in_standarddienste():
     print(text)
 
 
+def test_geraet_aus_der_suche_und_zweiter_versuch():
+    from akkutest.verbindung import VerbindungsFehler
+    FalscherClient.ziele.clear()
+    Bluetooth("AA:BB", geraet="aus der Suche").oeffnen()
+    assert FalscherClient.ziele == ["aus der Suche"], FalscherClient.ziele
+    # erster Versuch scheitert: neu suchen, mit dem frischen Gerät verbinden
+    FalscherClient.ziele.clear()
+    FalscherClient.scheitern = 1
+    v = Bluetooth("AA:BB", geraet="aus der Suche")
+    v.oeffnen()
+    assert FalscherClient.ziele == ["aus der Suche", "frisch gefunden"], FalscherClient.ziele
+    assert any("suche neu" in z for z in v.info)
+    # auch neu nicht zu finden: verständliche Meldung
+    FalscherClient.scheitern, FalscherScanner.gefunden = 1, None
+    try:
+        Bluetooth("AA:BB", geraet="x").oeffnen()
+        raise AssertionError("hätte scheitern müssen")
+    except VerbindungsFehler as e:
+        assert "aus- und wieder einschalten" in str(e), e
+    FalscherScanner.gefunden = "frisch gefunden"
+
+
 if __name__ == "__main__":
     test_alle_kanaele_und_nie_in_standarddienste()
+    test_geraet_aus_der_suche_und_zweiter_versuch()
     print("ok")

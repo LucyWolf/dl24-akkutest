@@ -34,6 +34,7 @@ class Anschluss:
     art: str        # "usb", "ble", "sim"
     adresse: str    # /dev/ttyUSB0, COM3, BLE-Adresse, "sim"
     name: str       # was in der Liste steht
+    geraet: object = None   # BLE: das Gerät aus der Suche (bleak.BLEDevice)
 
     def __str__(self) -> str:
         return self.name
@@ -194,7 +195,7 @@ def ble_suchen(dauer: float = 6.0) -> list[Anschluss]:
         if not name:
             continue
         aus.append((("dl24" not in name.lower() and "atorch" not in name.lower()), name,
-                    Anschluss("ble", adresse, f"Bluetooth: {name} ({adresse})")))
+                    Anschluss("ble", adresse, f"Bluetooth: {name} ({adresse})", geraet)))
     aus.sort(key=lambda x: (x[0], x[1]))          # DL24 zuerst
     return [a for *_, a in aus]
 
@@ -211,9 +212,10 @@ def _kurz(uuid: str) -> str:
 
 
 class Bluetooth(Verbindung):
-    def __init__(self, adresse: str) -> None:
+    def __init__(self, adresse: str, geraet=None) -> None:
         super().__init__()
         self.adresse = adresse
+        self.geraet = geraet
         self._client = None
         self._schreib = None
         self._getrennt_gewollt = False
@@ -234,8 +236,27 @@ class Bluetooth(Verbindung):
                 self._abgerissen("Bluetooth-Verbindung getrennt")
 
         async def verbinden():
-            client = BleakClient(self.adresse, disconnected_callback=getrennt)
-            await client.connect(timeout=15)
+            # Das Gerät aus der Suche nehmen statt der Adresse: mit der Adresse sucht
+            # bleak noch einmal, und sendet das Modul gerade nicht, heißt es
+            # "was not found" - so bei Lucy unter Windows. Klappt es nicht, einmal
+            # frisch suchen und noch einmal.
+            ziel = self.geraet or self.adresse
+            try:
+                client = BleakClient(ziel, disconnected_callback=getrennt)
+                await client.connect(timeout=20)
+            except Exception as erster:
+                log.warning("BLE: erster Versuch: %s - suche neu", erster)
+                self.info.append(f"erster Versuch ging nicht ({erster}), suche neu")
+                from bleak import BleakScanner
+                neu = await BleakScanner.find_device_by_address(self.adresse, timeout=15)
+                if neu is None:
+                    raise VerbindungsFehler(
+                        f"Der DL24 ({self.adresse}) sendet gerade nicht.\n\n"
+                        "• DL24 kurz aus- und wieder einschalten\n"
+                        "• Ist er noch mit dem Handy oder mit Windows verbunden? "
+                        "Dann dort trennen bzw. unter Bluetooth-Geräte entfernen.") from erster
+                client = BleakClient(neu, disconnected_callback=getrennt)
+                await client.connect(timeout=20)
             # Alles auflisten, was das Modul anbietet - landet im Diagnose-Reiter.
             # Auf jeder Eigenschaft lauschen, die melden kann: welche der DL24
             # wirklich benutzt, ist je nach Modul verschieden.
@@ -267,7 +288,7 @@ class Bluetooth(Verbindung):
             return client, schreiben
 
         try:
-            self._client, self._schreib = _AsyncSchleife.ausfuehren(verbinden(), 30)
+            self._client, self._schreib = _AsyncSchleife.ausfuehren(verbinden(), 70)
         except VerbindungsFehler:
             raise
         except Exception as e:
@@ -300,7 +321,7 @@ def oeffnen(anschluss: Anschluss) -> Verbindung:
     if anschluss.art == "usb":
         v: Verbindung = Seriell(anschluss.adresse)
     elif anschluss.art == "ble":
-        v = Bluetooth(anschluss.adresse)
+        v = Bluetooth(anschluss.adresse, anschluss.geraet)
     elif anschluss.art == "sim":
         from .simulator import SimulatorVerbindung
         v = SimulatorVerbindung(protokoll=anschluss.adresse.split(":")[1] if ":" in anschluss.adresse else "px100")
