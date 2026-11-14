@@ -15,8 +15,27 @@ def test_atorch_hin_und_zurueck():
     assert len(paket) == 36 and paket[:4] == b"\xff\x55\x01\x02"
     zurueck = p.atorch_lesen(paket)
     assert zurueck == w, zurueck
-    kaputt = bytearray(paket); kaputt[5] ^= 1
-    assert p.atorch_lesen(bytes(kaputt)) is None, "Prüfsumme muss falsche Pakete abweisen"
+    fremd = bytearray(paket); fremd[3] = 0x03          # USB-Messgerät, nicht DL24
+    assert p.atorch_lesen(bytes(fremd)) is None
+
+
+# Echte Berichte von Lucys DL24 (14.11.2026, Bluetooth). Das letzte Byte ist
+# immer 23 - die Firmware rechnet keine Prüfsumme.
+ECHT_LEERLAUF = "FF 55 01 02 00 00 32 00 00 00 00 00 BB 00 00 00 01 00 00 64 00 00 00 00 00 1B 00 00 00 00 3C 00 00 00 00 23"
+ECHT_LAST = "FF 55 01 02 00 00 2E 00 03 E8 00 00 BC 00 00 00 01 00 00 64 00 00 00 00 00 1C 00 00 00 00 3C 00 00 00 00 23"
+
+
+def test_echtes_geraet():
+    w = p.atorch_lesen(bytes.fromhex(ECHT_LEERLAUF))
+    assert w and w.spannung == 5.0 and w.strom == 0 and w.temperatur == 27, w
+    w = p.atorch_lesen(bytes.fromhex(ECHT_LAST))
+    assert w and w.spannung == 4.6 and w.strom == 1.0 and w.temperatur == 28 and w.kapazitaet_mah == 1880, w
+    # über Bluetooth zerstückelt, wie es ankommt
+    e, aus = Entwirrer(), []
+    roh = bytes.fromhex(ECHT_LEERLAUF) + bytes.fromhex(ECHT_LAST)
+    for i in range(0, len(roh), 20):
+        aus += e.hinein(roh[i:i + 20])
+    assert [a for a, _ in aus] == ["atorch", "atorch"], aus
 
 
 def test_px100():

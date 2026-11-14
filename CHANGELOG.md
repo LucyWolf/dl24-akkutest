@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.7 – 14.11.2026
+
+- DL24 mit 2,4"-Farbdisplay wird erkannt. Er schickt die üblichen
+  Atorch-Berichte, aber als Prüfsumme immer 23 – die App hat deshalb jeden
+  Bericht verworfen. Die Prüfsumme wird nicht mehr verlangt; Bruchstücke
+  erkennt die App daran, dass mittendrin das nächste Paket beginnt.
+
 ## 1.0.6 – 14.11.2026
 
 - Sendet das Gerät Daten in einem Format, das die App nicht kennt, bleibt sie

@@ -48,8 +48,9 @@ def atorch_lesen(paket: bytes) -> AtorchWerte | None:
         return None
     if paket[2] != ATORCH_BERICHT or paket[3] != GERAET_DC:
         return None
-    if atorch_pruefsumme(paket) != paket[-1]:
-        return None
+    # Keine Prüfsumme verlangen: Lucys DL24 (2,4"-Farbdisplay) schickt immer 23
+    # als letztes Byte, egal was drinsteht. Gegen Bruchstücke schützt der
+    # Entwirrer, indem er auf einen zweiten Kopf innerhalb des Pakets achtet.
     u24 = lambda i: int.from_bytes(paket[i:i + 3], "big")
     return AtorchWerte(
         spannung=u24(4) / 10,

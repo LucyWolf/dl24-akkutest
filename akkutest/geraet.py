@@ -57,6 +57,12 @@ class Entwirrer:
                 if b[1] == 0x55:
                     if len(b) < p.ATORCH_LAENGE:
                         break
+                    # Fängt mittendrin schon das nächste Paket an, war dieses
+                    # ein Bruchstück - ohne Prüfsumme merkt man es nur so
+                    weiter = b.find(b"\xff\x55\x01", 1, p.ATORCH_LAENGE)
+                    if weiter > 0:
+                        del b[:1]        # nur den Kopf verwerfen: dazwischen kann eine Antwort stecken
+                        continue
                     w = p.atorch_lesen(bytes(b[:p.ATORCH_LAENGE]))
                     if w is not None:
                         aus.append(("atorch", w))
