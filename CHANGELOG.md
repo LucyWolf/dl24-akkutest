@@ -1,6 +1,14 @@
 # Changelog
 
-## 1.0.8 – 14.11.2026
+## 1.0.9 – 14.11.2026
+
+- Enthält 1.0.7 und 1.0.8, die nie gebaut wurden.
+- Die Kapazität kommt jetzt aus dem Zähler im Gerät (Stand am Ende minus
+  Stand beim Start). Die eigene Rechnung aus Strom × Zeit lag bei
+  unregelmäßig ankommenden Messwerten daneben; sie dient nur noch als
+  Ersatz, wenn das Gerät keinen Zähler meldet.
+
+## 1.0.8 – 14.11.2026 (nicht veröffentlicht)
 
 - Enthält 1.0.7, die nie gebaut wurde.
 - Die Live-Kurve konnte einen Fehler werfen, wenn gerade ein neuer Messwert

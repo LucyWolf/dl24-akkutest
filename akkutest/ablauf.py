@@ -63,6 +63,9 @@ class Ablauf:
         self._ll_werte: list[float] = []
         self._vorher: Messwert | None = None
         self._t0: float | None = None
+        self._mah_rechnung = 0.0
+        self._zaehler_vorher: float | None = None
+        self._zaehler_start: float | None = None
         self._unter: int = 0
         self._aus: int = 0
         self._min_v: float | None = None
@@ -82,6 +85,8 @@ class Ablauf:
         return self.ergebnis.dauer_s
 
     def messwert(self, m: Messwert) -> None:
+        if self._t0 is None and m.mah_geraet is not None:
+            self._zaehler_vorher = m.mah_geraet      # Stand kurz vor dem Start
         try:
             getattr(self, f"_{self.zustand}", lambda m: None)(m)
         except Exception as e:                     # nie still sterben
@@ -140,6 +145,7 @@ class Ablauf:
             if m.strom <= STROM_AUS:
                 return                   # Befehl unterwegs, Last noch nicht an
             self._t0 = m.zeit
+            self._zaehler_start = self._zaehler_vorher
             self.start_wann = time.time()
         v = self._vorher
         if v is not None:
@@ -147,11 +153,21 @@ class Ablauf:
             # Auch über Lücken (Bluetooth-Aussetzer) weiterzählen: bei konstantem
             # Strom stimmt die Fläche trotzdem, Auslassen würde mAh verschlucken
             if dt > 0:
-                erg.mah += (v.strom + m.strom) / 2 * dt / 3.6
+                self._mah_rechnung += (v.strom + m.strom) / 2 * dt / 3.6
                 erg.wh += (v.leistung + m.leistung) / 2 * dt / 3600
         self._vorher = m
         erg.dauer_s = m.zeit - self._t0
         erg.mah_geraet = m.mah_geraet
+        # Maßgeblich ist der Zähler im Gerät: er zählt im Gerät selbst und hängt
+        # nicht davon ab, wann Messwerte ankommen (Bluetooth-Aussetzer, langsamer
+        # Rechner). Die eigene Rechnung nur, wenn das Gerät keinen Zähler meldet.
+        if m.mah_geraet is not None:
+            start = self._zaehler_start or 0.0
+            if m.mah_geraet < start:              # Gerät hat beim Start selbst genullt
+                start = self._zaehler_start = 0.0
+            erg.mah = m.mah_geraet - start
+        else:
+            erg.mah = self._mah_rechnung
 
         belastet = m.strom > STROM_AUS
         if belastet:
