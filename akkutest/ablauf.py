@@ -194,7 +194,9 @@ class Ablauf:
         if not belastet:
             self._aus += 1
             if self._aus >= 3:
-                fast_leer = self._min_v is not None and self._min_v <= e.abschalt_v * 1.04
+                # Am Ende fällt die Spannung steil: der letzte Wert vor dem Abschalten
+                # kann je nach Strom und Takt ein gutes Stück über der Grenze liegen
+                fast_leer = self._min_v is not None and self._min_v <= e.abschalt_v * 1.06
                 self._beenden("Gerät hat bei der Abschaltspannung beendet" if fast_leer
                               else "Last wurde vorzeitig ausgeschaltet", vollstaendig=fast_leer)
         else:

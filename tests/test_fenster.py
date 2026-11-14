@@ -16,10 +16,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from akkutest import fenster
+from akkutest import fenster, geraet
 from akkutest.simulator import SimAkku, SimulatorVerbindung
 from akkutest.speicher import Speicher
 
+geraet.INTERVALL = 0.02       # Zeitraffer: sonst liegen 25 Simulator-Minuten zwischen zwei Werten
 FOTOS = Path(sys.argv[1]) if len(sys.argv) > 1 else None
 app = QApplication([])
 # Rückfragen und Meldungen dürfen den Test nicht anhalten
@@ -50,7 +51,6 @@ def verbinden(f, protokoll):
                                 if protokoll == "px100" else f.anschluss.count() - 1)
     f.verbinden_umschalten()
     assert warten(lambda: f.geraet is not None), meldungen
-    f.geraet.intervall = 0.02
     assert warten(lambda: f.letzter is not None)
 
 

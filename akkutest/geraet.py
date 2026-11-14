@@ -19,6 +19,10 @@ from .verbindung import Verbindung, VerbindungsFehler
 
 log = logging.getLogger("akkutest.geraet")
 
+# Abfrage-Takt in Sekunden. Die Tests stellen ihn für den Zeitraffer kürzer,
+# bevor das Fenster verbindet - sonst gilt bis zur ersten Abfrage noch 1 s.
+INTERVALL = 1.0
+
 
 @dataclass
 class Messwert:
@@ -77,10 +81,10 @@ class Entwirrer:
 
 
 class Geraet:
-    def __init__(self, verbindung: Verbindung, intervall: float = 1.0,
+    def __init__(self, verbindung: Verbindung, intervall: float | None = None,
                  bei_roh: Callable[[str, bytes], None] | None = None) -> None:
         self.v = verbindung
-        self.intervall = intervall
+        self.intervall = intervall or INTERVALL
         self.bei_roh = bei_roh
         self.bei_messwert: Callable[[Messwert], None] | None = None
         self.bei_fehler: Callable[[str], None] | None = None

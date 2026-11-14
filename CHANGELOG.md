@@ -1,6 +1,14 @@
 # Changelog
 
-## 1.0.2 – 14.11.2026
+## 1.0.3 – 14.11.2026
+
+- Schaltet das Gerät am Ende selbst ab, gilt der Test jetzt bis 6 % über der
+  Abschaltspannung als vollständig (vorher 4 %). Am Ende fällt die Spannung
+  steil, und bei hohem Strom lag der letzte Messwert vor dem Abschalten
+  darüber – ein vollständiger Test wäre als „vorzeitig“ gewertet worden.
+- Enthält die Änderungen aus 1.0.2, die nie gebaut wurde.
+
+## 1.0.2 – 14.11.2026 (nicht veröffentlicht)
 
 - Im dunklen Windows-Design waren die Beschriftungen über den Messwerten und
   der Hinweis zum Akkutyp kaum zu sehen
