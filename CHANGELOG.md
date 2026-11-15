@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.16 – 15.11.2026
+
+- **Neu: Reiter „Steuerung“** – den DL24 von Hand bedienen wie in der
+  Atorch-Software: Strom und Abschaltspannung einstellen, Start/Stop, Zähler
+  nullen. Dazu alle Messwerte, auch Widerstand und die Temperatur von Gerät und
+  Fühler. Stop geht immer und bricht auch einen laufenden Test ab.
+
 ## 1.0.15 – 15.11.2026
 
 - **Neu: Ladegeräte, Netzteile und USB-Hubs prüfen** (eigener Reiter). Angaben

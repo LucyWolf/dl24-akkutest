@@ -129,6 +129,9 @@ class Fenster(QMainWindow):
         from .netzteil_reiter import NetzteilReiter      # hier: der Reiter nutzt Teile dieser Datei
         self.nt = NetzteilReiter(self)
         self.reiter.addTab(self.nt, "Ladegeräte && Netzteile")
+        from .steuerung_reiter import SteuerungReiter
+        self.steuerung = SteuerungReiter(self)
+        self.reiter.addTab(self.steuerung, "Steuerung")
         self.reiter.addTab(self._reiter_diagnose(), "Diagnose")
         self.reiter.currentChanged.connect(lambda i: i == 1 and self._akkus_laden())
         lay.addWidget(self.reiter)
@@ -303,6 +306,7 @@ class Fenster(QMainWindow):
         laeuft = bool(self.ablauf and self.ablauf.laeuft)
         bekannt = bool(g) and g.protokoll != "unbekannt"
         self.nt.zustand_zeigen(g, laeuft)
+        self.steuerung.zustand_zeigen(g, laeuft or self.nt.laeuft)
         self.knopf_start.setEnabled(bekannt and not laeuft and not self.nt.laeuft)
         self.knopf_abbruch.setEnabled(laeuft)
         self.knopf_erkennen.setEnabled(bekannt and not laeuft)
@@ -592,6 +596,7 @@ class Fenster(QMainWindow):
     def _messwert(self, m: Messwert) -> None:
         self.letzter = m
         self.nt.messwert(m)
+        self.steuerung.messwert(m)
         a = self.anz
         # Im Atorch-Bericht (Bluetooth) kommt die Spannung nur in 0,1-V-Schritten -
         # drei Nachkommastellen täuschten eine Genauigkeit vor, die es nicht gibt.
@@ -956,7 +961,7 @@ def main() -> int:
     if "--fenster-probe" in sys.argv:
         # Für den Bau: öffnet das Fenster wirklich und schließt es wieder
         sichtbar = []
-        QTimer.singleShot(800, lambda: (sichtbar.append(f.isVisible() and f.reiter.count() == 4), app.quit()))
+        QTimer.singleShot(800, lambda: (sichtbar.append(f.isVisible() and f.reiter.count() == 5), app.quit()))
         rc = app.exec()
         print("Fenster geöffnet:", sichtbar, f.windowTitle())
         return rc if sichtbar == [True] else 1

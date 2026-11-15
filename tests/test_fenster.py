@@ -120,7 +120,7 @@ def test_ganzer_ablauf():
     assert "Zelle A" in inhalt and "Zustand %" in inhalt
 
     # Diagnose zeigt die Bytes
-    f.reiter.setCurrentIndex(3)
+    f.reiter.setCurrentIndex(4)
     assert "> B1 B2 11" in f.diag.toPlainText()
     assert "< CA CB" in f.diag.toPlainText()
     foto(f, "5-diagnose")
@@ -238,6 +238,51 @@ def test_netzteil_reiter():
     f.nt.tabelle.selectRow(0)
     app.processEvents()
     assert "Hält die Angabe" in f.nt.ergebnis.text()
+    f.trennen()
+    f.close()
+
+
+def test_steuerung_von_hand():
+    geraet.HID_INTERVALL = 0.02
+    SimulatorVerbindung.voreinstellung = {"tempo": 5}
+    f = fenster.Fenster(Speicher())
+    f.show()
+    f.reiter.setCurrentIndex(3)
+    assert f.reiter.tabText(3) == "Steuerung"
+    assert not f.steuerung.knopf_ein.isEnabled()
+    f.anschluss.setCurrentIndex(f.anschluss.findText("Simulator – USB-Ladegerät", flags=fenster.Qt.MatchStartsWith))
+    f.verbinden_umschalten()
+    assert warten(lambda: f.geraet is not None and f.letzter is not None), meldungen
+    assert f.steuerung.knopf_ein.isEnabled()
+    dev = f.geraet.v.geraet
+    f.steuerung.strom.setValue(1.25)
+    f.steuerung.last(True)
+    assert warten(lambda: dev.an and abs(dev.soll_a - 1.25) < 1e-6, 5)
+    assert warten(lambda: "an" in f.steuerung.zustand.text() and f.steuerung.anz["i"].wert.text() == "1,250 A", 5), \
+        f.steuerung.anz["i"].wert.text()
+    f.steuerung.strom.setValue(0.8)
+    f.steuerung.strom_setzen()
+    assert warten(lambda: abs(dev.soll_a - 0.8) < 1e-6, 5)
+    f.steuerung.abschalt.setValue(3.3)
+    f.steuerung.abschalt_setzen()
+    assert warten(lambda: abs(dev.abschalt_v - 3.3) < 1e-4, 5)
+    foto(f, "9-steuerung")
+    f.steuerung.last(False)
+    assert warten(lambda: not dev.an and "aus" in f.steuerung.zustand.text(), 5)
+    # zu viel Leistung wird abgelehnt
+    f.steuerung.strom.setValue(19.0)
+    f.steuerung.letzter.spannung = 12.0
+    meldungen.clear()
+    f.steuerung.last(True)
+    assert meldungen and "150 W" in meldungen[0]
+    # Stop während einer Netzteilprüfung bricht sie ab
+    f.nt.mit_dauer.setChecked(False)
+    f.nt.stufen.setValue(2)
+    f.nt.starten()
+    assert warten(lambda: dev.an, 10)
+    assert not f.steuerung.knopf_ein.isEnabled() and f.steuerung.knopf_aus.isEnabled()
+    f.steuerung.last(False)
+    assert warten(lambda: not f.nt.laeuft and not dev.an, 10)
     f.trennen()
     f.close()
 

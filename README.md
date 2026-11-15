@@ -20,6 +20,8 @@ echte Kapazität messen und sehen, wie viel sie gegenüber neu verloren haben.
 - **Ladegeräte, Netzteile, USB-Hubs prüfen**: Angaben vom Typenschild
   eintragen (oder Vorlage wählen) und prüfen, ob das Gerät sie hält – mit
   Stufentest, Dauertest mit Temperatur und Abschalttest
+- **Steuerung von Hand** wie in der Atorch-Software: Strom und Abschaltspannung
+  einstellen, Start/Stop, Zähler nullen (USB)
 - **Simulator** zum Ausprobieren ohne Gerät
 - **Diagnose**-Reiter: zeigt roh, was über die Leitung geht
 
