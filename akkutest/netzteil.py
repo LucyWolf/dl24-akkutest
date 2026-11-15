@@ -340,6 +340,14 @@ class NetzteilAblauf:
         anteil = s.soll_a / self.einstellung.strom_a * 100
         return f"{text}: {_k(s.soll_a, 2)} A ({_k(anteil, 0)} %), Schritt {self.i + 1}/{len(self.schritte)}"
 
+    def restzeit(self, jetzt: float) -> tuple[float, float] | None:
+        """(noch in diesem Schritt, noch insgesamt) in Sekunden."""
+        s = self.schritt
+        if self.zustand != "laeuft" or s is None:
+            return None
+        im = max(0.0, s.dauer_s - (jetzt - self._schritt_t0))
+        return im, im + sum(x.dauer_s for x in self.schritte[self.i + 1:])
+
     def messwert(self, m: Messwert) -> None:
         try:
             if self.zustand == "leerlauf":

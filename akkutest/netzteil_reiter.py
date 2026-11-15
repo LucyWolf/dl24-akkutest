@@ -206,6 +206,9 @@ class NetzteilReiter(QWidget):
         self.f = fenster
         self.ablauf: nt.NetzteilAblauf | None = None
         self._marken: list = []
+        self._marken_unten: list = []
+        self._geplant_s: float | None = None
+        self._nenn_v: float | None = None
         self._bauen()
         self._vorlage(0)
         self.verlauf_laden()
@@ -386,18 +389,50 @@ class NetzteilReiter(QWidget):
         self.knopf_weiter.hide()
         raster.addWidget(self.knopf_weiter, 1, 3)
         ol.addLayout(raster)
-        self.bild = pg.PlotWidget()
-        self.bild.setBackground(None)
-        self.bild.showGrid(x=True, y=True, alpha=0.25)
+        # Ein Diagramm in drei Streifen mit gemeinsamer Zeitachse:
+        # Spannung · Strom und Leistung · Temperatur (nur mit Fühler)
+        self.flaeche = pg.GraphicsLayoutWidget()
+        self.flaeche.setBackground(None)
+        self.flaeche.setMinimumHeight(380)
+        self.bild = self.flaeche.addPlot(row=0, col=0)
         self.bild.setLabel("left", "Spannung (V)")
-        self.bild.setLabel("bottom", "Zeit (min)")
         self.linie = self.bild.plot([], [], pen=pg.mkPen("#2f80ed", width=2))
         self.grenze = pg.InfiniteLine(angle=0, pen=pg.mkPen("#d03b3b", width=1, style=Qt.DashLine))
         self.grenze.hide()
         self.bild.addItem(self.grenze)
-        self.bild.setMinimumHeight(200)
-        self.f._ohne_vorsatz(self.bild)
-        ol.addWidget(self.bild, 1)
+        self.bild_i = self.flaeche.addPlot(row=1, col=0)
+        self.bild_i.setLabel("left", "Strom (A)", color="#2e9e4f")
+        self.bild_i.setLabel("right", "Leistung (W)", color="#e08a00")
+        self.linie_i = self.bild_i.plot([], [], pen=pg.mkPen("#2e9e4f", width=2))
+        self.box_p = pg.ViewBox()                      # zweite Skala rechts für die Leistung
+        self.bild_i.scene().addItem(self.box_p)
+        self.bild_i.getAxis("right").linkToView(self.box_p)
+        self.box_p.setXLink(self.bild_i)
+        self.linie_p = pg.PlotCurveItem([], [], pen=pg.mkPen("#e08a00", width=1.5, style=Qt.DashLine))
+        self.box_p.addItem(self.linie_p)
+        self.bild_i.vb.sigResized.connect(lambda: self.box_p.setGeometry(self.bild_i.vb.sceneBoundingRect()))
+        self.bild_t = pg.PlotItem()
+        self.bild_t.setLabel("left", "Temperatur (°C)", color="#d03b3b")
+        self.linie_t = self.bild_t.plot([], [], pen=pg.mkPen("#d03b3b", width=2))
+        self._mit_temp = False
+        for b in (self.bild, self.bild_i, self.bild_t):
+            b.showGrid(x=True, y=True, alpha=0.25)
+            self.f._ohne_vorsatz(b)
+            b.getAxis("left").setWidth(62)              # Streifen bündig untereinander
+        self.bild_i.getAxis("right").enableAutoSIPrefix(False)
+        for b in (self.bild, self.bild_i, self.bild_t):   # rechts gleich breit, sonst nicht bündig
+            b.showAxis("right")
+            b.getAxis("right").setWidth(48)
+        for b in (self.bild, self.bild_t):
+            b.getAxis("right").setStyle(showValues=False)
+        self.bild_i.setXLink(self.bild)
+        self.bild_t.setXLink(self.bild)
+        self.bild.hideAxis("bottom")
+        self.bild_i.setLabel("bottom", "Zeit (min)")
+        lay = self.flaeche.ci.layout
+        lay.setRowStretchFactor(0, 3)
+        lay.setRowStretchFactor(1, 2)
+        ol.addWidget(self.flaeche, 1)
         self.ergebnis = QLabel()
         self.ergebnis.setWordWrap(True)
         self.ergebnis.setTextFormat(Qt.RichText)
@@ -620,9 +655,16 @@ class NetzteilReiter(QWidget):
             self.grenze.show()
         self.ergebnis.hide()
         self.ergebnis_rahmen.hide()
-        self.bild.enableAutoRange()
-        self.linie.setData([], [])
+        self._kurven([])
         self._marken_zeichnen([], neu=True)
+        # Zeitachse gleich über die ganze geplante Dauer
+        self._nenn_v = self.ablauf.einstellung.nenn_v if isinstance(self.ablauf, nt.NetzteilAblauf) else None
+        if isinstance(self.ablauf, nt.NetzteilAblauf):
+            self._geplant_s = sum(x.dauer_s for x in self.ablauf.schritte) + 5
+            self.bild.setXRange(0, self._geplant_s / 60, padding=0.02)
+        else:
+            self._geplant_s = None
+            self.bild.enableAutoRange(x=True)
         if not self.schnell.isChecked():
             self.schritt.setText("Leerlaufspannung messen …")
         log.info("Netzteiltest gestartet: %s", plan)
@@ -641,13 +683,55 @@ class NetzteilReiter(QWidget):
         if ab and ab.laeuft:
             ab.messwert(m)
 
+    def _kurven(self, punkte: list) -> None:
+        """Alle Streifen aus den Punkten (s, V, A, °C oder None)."""
+        x = [p[0] / 60 for p in punkte]
+        v = [p[1] for p in punkte]
+        self.linie.setData(x, v)
+        # Spannungsachse nach dem Betrieb, nicht nach dem Einbruch auf 0 beim Abschalten -
+        # sonst werden die Stufen platt
+        if self._nenn_v and v:
+            gut = [u for u in v if u >= self._nenn_v * nt.ZUSAMMENBRUCH] or v
+            lo, hi = min(gut), max(gut)
+            if self.grenze.isVisible():
+                lo = min(lo, self.grenze.value())
+            rand = max(0.02, (hi - lo) * 0.12)
+            self.bild.setYRange(lo - rand, hi + rand, padding=0)
+        else:
+            self.bild.enableAutoRange(y=True)
+        self.linie_i.setData(x, [p[2] for p in punkte])
+        self.linie_p.setData(x, [p[1] * p[2] for p in punkte])
+        mit = [(xx, p[3]) for xx, p in zip(x, punkte) if len(p) > 3 and p[3] is not None]
+        if mit and not self._mit_temp:
+            self.flaeche.addItem(self.bild_t, row=2, col=0)
+            self.flaeche.ci.layout.setRowStretchFactor(2, 2)
+            self.bild_i.setLabel("bottom", "")
+            self.bild_i.hideAxis("bottom")
+            self.bild_t.setLabel("bottom", "Zeit (min)")
+            self._mit_temp = True
+        elif not mit and self._mit_temp:
+            self.flaeche.removeItem(self.bild_t)
+            self.bild_i.showAxis("bottom")
+            self.bild_i.setLabel("bottom", "Zeit (min)")
+            self._mit_temp = False
+        self.linie_t.setData([a for a, _ in mit], [b for _, b in mit])
+        self.box_p.enableAutoRange(y=True)
+
     def _marken_zeichnen(self, marken: list, neu: bool = False) -> None:
         """Senkrechte Linien an jedem Stufenwechsel, beschriftet mit dem Strom."""
         if neu:
             for linie in getattr(self, "_marken", []):
                 self.bild.removeItem(linie)
+            for b, linie in getattr(self, "_marken_unten", []):
+                b.removeItem(linie)
             self._marken = []
+            self._marken_unten = []
         for t, text in marken[len(self._marken):]:
+            for b in (self.bild_i, self.bild_t):
+                unten = pg.InfiniteLine(pos=t / 60, angle=90, movable=False,
+                                        pen=pg.mkPen((128, 128, 128, 110), width=1, style=Qt.DashLine))
+                b.addItem(unten)
+                self._marken_unten.append((b, unten))
             linie = pg.InfiniteLine(pos=t / 60, angle=90, movable=False,
                                     pen=pg.mkPen((128, 128, 128, 140), width=1, style=Qt.DashLine),
                                     label=text, labelOpts={"position": 0.04, "rotateAxis": (1, 0),
@@ -663,10 +747,19 @@ class NetzteilReiter(QWidget):
         self.anz["p"].setzen(zahl(m.leistung, 2, "W"))
         self.anz["t"].setzen(zahl(m.temp_fuehler, 1, "°C") if m.temp_fuehler is not None else "kein Fühler")
         ab = self.ablauf
+        teil = ab.teil if isinstance(ab, nt.TriggerAblauf) else ab
+        if ab and ab.laeuft and isinstance(teil, nt.NetzteilAblauf):
+            rest = teil.restzeit(m.zeit)
+            if rest:
+                vorn = self.schritt.text().split(" · noch")[0]
+                self.schritt.setText(f"{vorn} · noch {dauer_text(rest[0])[2:]} · gesamt noch "
+                                     f"{dauer_text(rest[1])}")
         if ab:
             punkte = list(ab.punkte)
             if punkte:
-                self.linie.setData([x[0] / 60 for x in punkte], [x[1] for x in punkte])
+                self._kurven(punkte)
+                if self._geplant_s and punkte[-1][0] > self._geplant_s:
+                    self.bild.enableAutoRange(x=True)   # länger als geplant: mitwachsen
             self._marken_zeichnen(list(ab.ergebnis.marken))
 
     def ereignis(self, art: str, text: str) -> None:
@@ -768,7 +861,9 @@ class NetzteilReiter(QWidget):
         self.ergebnis.show()
         self.ergebnis_rahmen.show()
         k = d["kurve"]
-        self.linie.setData([x[0] / 60 for x in k], [x[1] for x in k])
+        self._nenn_v = None if d["einstellung"].get("trigger") else d["einstellung"]["nenn_v"]
+        self._kurven(k)
+        self.bild.enableAutoRange(x=True)
         self._marken_zeichnen([], neu=True)
         self._marken_zeichnen(d["ergebnis"].get("marken") or [])
         e = d["einstellung"]
@@ -777,7 +872,8 @@ class NetzteilReiter(QWidget):
         else:
             self.grenze.setValue(e["nenn_v"] * (1 - e["toleranz_proz"] / 100))
             self.grenze.show()
-        self.bild.enableAutoRange()
+        self._kurven(k)                     # Achse mit der Toleranzlinie neu setzen
+        self.bild.enableAutoRange(x=True)
 
     def _zeigen(self, e: dict, r: dict) -> None:
         self._angezeigt = (dict(e), dict(r))
@@ -806,7 +902,7 @@ class NetzteilReiter(QWidget):
                                                   f"Prüfbericht {name} {datetime.now():%Y-%m-%d}.pdf", "PDF (*.pdf)")
             if not pfad:
                 return None
-        bild = self.bild.grab().toImage()
+        bild = self.flaeche.grab().toImage()
         doc = QTextDocument()
         doc.addResource(QTextDocument.ImageResource, QUrl("kurve.png"), bild)
         breite = 640

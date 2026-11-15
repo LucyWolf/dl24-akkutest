@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.20 – 15.11.2026
+
+- **Vollständiges Diagramm** bei der Netzteilprüfung: oben die Spannung, darunter
+  Strom und Leistung, darunter die Temperatur (sobald ein Fühler steckt) – alle
+  mit derselben Zeitachse und den Stufenlinien.
+- Die Zeitachse zeigt von Anfang an die ganze geplante Dauer; die
+  Spannungsachse richtet sich nach dem Betrieb, nicht nach dem Einbruch beim
+  Abschalten.
+- Restzeit in der Anzeige: „noch 7:30 · gesamt noch 0:08:40“ – damit ist klar,
+  dass ein langer Dauertest nicht hängt.
+
 ## 1.0.19 – 15.11.2026
 
 - **Klares Urteil** bei Netzteilen und Ladegeräten: ✔ Empfehlenswert,

@@ -232,7 +232,8 @@ def test_netzteil_reiter():
     assert "4,75" in f.nt.angabe_hinweis.text()
     f.nt.starten()
     assert f.nt.laeuft and not f.knopf_start.isEnabled()      # kein Akkutest nebenher
-    assert warten(lambda: f.nt.schritt.text().startswith("Stufentest"), 10), f.nt.schritt.text()
+    assert warten(lambda: f.nt.schritt.text().startswith("Stufentest") and "gesamt noch" in f.nt.schritt.text(),
+                  10), f.nt.schritt.text()
     foto(f, "7-netzteil-laeuft")
     assert warten(lambda: not f.nt.laeuft and f.nt.ergebnis.isVisible(), 60), f.nt.ablauf.zustand
     r = f.nt.ablauf.ergebnis
