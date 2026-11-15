@@ -178,8 +178,12 @@ def hex_text(daten: bytes) -> str:
 # als HID-Gerät 0483:5750. Es spricht nur, wenn es gefragt wird: 64-Byte-Pakete,
 # das erste Byte ist die Report-ID (hin 55, zurück AA).
 #
-#   Anmelden:  55 05 09 02 00 00 00 EE FF       -> AA 05 <adr> 04 01 .. .. .. EE FF
-#   Abfragen:  55 05 <adr> 05 0B 00 8C EE FF    -> AA 05 <adr> 05 + 60 Byte Messwerte
+#   Abfragen:  55 05 01 05 0B 00 8C EE FF    -> AA 05 01 05 + 60 Byte Messwerte
+#
+# ACHTUNG: 55 05 09 02 ... schickt die Atorch-Software NUR beim Knopf
+# "Firmware-Update starten" - der DL24 geht davon in den Update-Modus.
+# 1.0.11/1.0.12 hielten es für ein "Anmelden" und schickten es beim Verbinden.
+# Es darf nie wieder gesendet werden; hid_befehl() und hid_paket() weisen es ab.
 #
 # Die Messwerte sind 32-Bit-Zahlen (little endian) in Tausendsteln, ab Byte 8:
 # Spannung, Strom, Leistung, Widerstand, Wh, mAh, Fühler-, CPU-, MOSFET-Temperatur,
@@ -192,22 +196,52 @@ HID_LAENGE = 64
 HID_HIN = 0x55
 HID_ZURUECK = 0xAA
 HID_FAMILIE = 0x05
-HID_ANMELDEN = 0x02
-HID_ADRESSE = 0x04          # Antwort auf das Anmelden
+HID_UPDATE_START = 0x02     # nie senden (siehe oben)
 HID_MESSWERTE = 0x05
-HID_ADRESSE_ANFANG = 0x01   # bis das Gerät seine meldet
+HID_ADRESSE = 0x01          # fest, wie in der Atorch-Software
+
+# Befehle: 55 05 <adr> <befehl> d0 d1 d2 d3 EE FF. Zahlen als float32, höchstes
+# Byte zuerst - so baut sie die Atorch-Software aus dem Eingabefeld.
+HID_SOLLWERT = 0x21         # Strom in A (Knopf "value")
+HID_LAST = 0x25             # 01 = ein, 00 = aus (Knopf "Run")
+HID_ABSCHALT = 0x29         # Abschaltspannung in V ("zero_v")
+HID_LADESCHLUSS_V = 0x2A    # "full_v" - nicht benutzt
+HID_LADESCHLUSS_A = 0x2B    # "full_a" - nicht benutzt
+HID_ZEITGRENZE = 0x31       # d0 = 01 Stunden / 02 Minuten - nicht benutzt
+HID_STROM_LOESCHEN = 0x32   # "clearcurrent" - nicht benutzt
+HID_WERKSEINSTELLUNG = 0x33 # nie senden
+HID_ZAEHLER_NULL = 0x34     # "datazero": mAh, Wh, Zeit auf 0
+
+
+VERBOTEN = (HID_UPDATE_START, HID_WERKSEINSTELLUNG)
 
 
 def hid_paket(inhalt: bytes) -> bytes:
-    return bytes(inhalt).ljust(HID_LAENGE, b"\x00")
+    inhalt = bytes(inhalt)
+    if len(inhalt) >= 4 and inhalt[0] == HID_HIN and inhalt[3] in VERBOTEN:
+        raise ValueError(f"Befehl {inhalt[3]:02X} wird nie gesendet (Update/Werkseinstellung)")
+    return inhalt.ljust(HID_LAENGE, b"\x00")
 
 
-def hid_anmelden() -> bytes:
-    return hid_paket(bytes([HID_HIN, HID_FAMILIE, 0x09, HID_ANMELDEN, 0, 0, 0, 0xEE, 0xFF]))
-
-
-def hid_abfrage(adresse: int) -> bytes:
+def hid_abfrage(adresse: int = HID_ADRESSE) -> bytes:
     return hid_paket(bytes([HID_HIN, HID_FAMILIE, adresse & 0xFF, HID_MESSWERTE, 0x0B, 0x00, 0x8C, 0xEE, 0xFF]))
+
+
+def hid_befehl(adresse: int, befehl: int, daten: bytes = b"\0\0\0\0") -> bytes:
+    assert len(daten) == 4 and befehl not in VERBOTEN
+    return hid_paket(bytes([HID_HIN, HID_FAMILIE, adresse & 0xFF, befehl]) + daten + b"\xee\xff")
+
+
+def hid_zahl(wert: float) -> bytes:
+    import struct
+    return struct.pack(">f", float(wert))
+
+
+def hid_befehl_lesen(paket: bytes) -> tuple[int, int, bytes] | None:
+    """Gegenstück für den Simulator: (Adresse, Befehl, 4 Datenbytes)."""
+    if len(paket) < 10 or paket[0] != HID_HIN or paket[1] != HID_FAMILIE or paket[8:10] != b"\xee\xff":
+        return None
+    return paket[2], paket[3], bytes(paket[4:8])
 
 
 @dataclass
@@ -235,14 +269,6 @@ def _hid_anfang(paket: bytes) -> bytes | None:
     return None
 
 
-def hid_adresse_lesen(paket: bytes) -> int | None:
-    """Antwort auf das Anmelden: die Adresse des Geräts."""
-    p = _hid_anfang(paket)
-    if p is None or len(p) < 10 or p[3] != HID_ADRESSE or p[8:10] != b"\xee\xff" or p[4] != 1:
-        return None
-    return p[2]
-
-
 def hid_lesen(paket: bytes, adresse: int | None = None) -> HidWerte | None:
     p = _hid_anfang(paket)
     if p is None or len(p) < HID_LAENGE or p[3] != HID_MESSWERTE:
@@ -259,7 +285,7 @@ def hid_lesen(paket: bytes, adresse: int | None = None) -> HidWerte | None:
     return HidWerte(*w, an=p[0x34] != 0, firmware=f"{p[0x36] // 10}.{p[0x36] % 10}")
 
 
-def hid_bauen(w: HidWerte, adresse: int = HID_ADRESSE_ANFANG) -> bytes:
+def hid_bauen(w: HidWerte, adresse: int = HID_ADRESSE) -> bytes:
     """Gegenstück zu hid_lesen - für den Simulator und die Tests."""
     p = bytearray(HID_LAENGE)
     p[0:4] = bytes([HID_ZURUECK, HID_FAMILIE, adresse, HID_MESSWERTE])
@@ -276,6 +302,3 @@ def hid_bauen(w: HidWerte, adresse: int = HID_ADRESSE_ANFANG) -> bytes:
     p[0x3C] = zeichen
     return bytes(p)
 
-
-def hid_adresse_bauen(adresse: int) -> bytes:
-    return hid_paket(bytes([HID_ZURUECK, HID_FAMILIE, adresse, HID_ADRESSE, 1, 0, 0, 0, 0xEE, 0xFF]))

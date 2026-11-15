@@ -26,7 +26,7 @@ def durchspielen(protokoll, akku, strom, abschalt, tempo=600, frist=60, abbruch_
     def messwert(m):
         ab.messwert(m)
         # beim Atorch-Gerät spielt der Test den Menschen am Gerät
-        if protokoll in ("atorch", "hid"):
+        if protokoll == "atorch":
             if ab.zustand == "warten" and not v.geraet.an:
                 v.geraet.soll_a, v.geraet.abschalt_v, v.geraet.an = strom, abschalt, True
             if abbruch_bei_v and m.spannung <= abbruch_bei_v:
@@ -68,14 +68,18 @@ def test_atorch_nur_berichte():
 
 
 def test_usb_hid():
-    # DL24/P am USB-Kabel: nur Messwerte, aber auf 1 mV genau; Strom kommt negativ
+    # DL24/P am USB-Kabel: fernsteuerbar, auf 1 mV genau; Strom kommt negativ
     akku = SimAkku("liion", 1, mah=2000, innen_mohm=50)
-    ab, ev, dev = durchspielen("hid", akku, 1.0, 3.0)
+    ab, ev, dev = durchspielen("hid", akku, 1.25, 3.0)
     r = ab.ergebnis
     print("hid:", r)
-    assert not ab.steuerbar
+    assert ab.steuerbar
     assert r.vollstaendig, r.grund
-    assert 1800 < r.mah < 2010, r.mah
+    assert not dev.an, "Last muss am Ende aus sein"
+    assert not dev.update_modus, "Update-Start gesendet"
+    assert abs(dev.abschalt_v - 3.0) < 1e-6 and abs(dev.soll_a - 1.25) < 1e-6, (dev.abschalt_v, dev.soll_a)
+    assert r.innen_mohm and 40 < r.innen_mohm < 60, r.innen_mohm
+    assert 1700 < r.mah < 2010, r.mah
     assert abs(r.mah - dev.mah) / dev.mah < 0.02, (r.mah, dev.mah)
     # 4,18 V Ruhe - über Bluetooth käme hier 4,2 an
     assert 4.17 < r.leerlauf_v < 4.19, r.leerlauf_v

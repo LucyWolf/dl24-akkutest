@@ -282,7 +282,7 @@ class Fenster(QMainWindow):
                 self.status.setText("✔ verbunden – Format unbekannt (Daten werden mitgeschrieben)")
             else:
                 if g.protokoll == "hid":
-                    art = "USB, nur Messwerte" + (f" (Firmware {g.firmware})" if g.firmware else "")
+                    art = "USB, fernsteuerbar" + (f" (Firmware {g.firmware})" if g.firmware else "")
                 else:
                     art = "fernsteuerbar (PX100)" if g.kann_steuern else "nur Messwerte (Atorch-Bericht)"
                 self.status.setText(f"✔ verbunden – {art}")

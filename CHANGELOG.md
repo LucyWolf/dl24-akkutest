@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.13 – 15.11.2026
+
+- **Wichtig für 1.0.11 und 1.0.12:** Beim Verbinden über USB schickten sie ein
+  Paket, das für ein „Anmelden“ gehalten wurde. Tatsächlich ist es der Befehl
+  „Firmware-Update starten“ aus der Atorch-Software: Der DL24 ging davon in den
+  Update-Modus. Ohne Firmware-Datei wird nichts überschrieben – Kabel ziehen
+  bzw. Gerät aus- und einschalten, dann startet er normal. Das Paket ist
+  entfernt und lässt sich in der App nicht einmal mehr bauen, ebenso der Befehl
+  für die Werkseinstellung.
+- **Steuerung über USB**: Die App setzt beim Test über USB Strom und
+  Abschaltspannung selbst, nullt die Zähler und schaltet die Last ein und aus –
+  wie beim PX100. Die Befehle sind dieselben, die die Atorch-Software über ihre
+  Knöpfe schickt.
+- Sicherung: Fließt über USB deutlich mehr Strom als eingestellt, schaltet die
+  App die Last sofort ab.
+
 ## 1.0.12 – 15.11.2026
 
 - USB: Der DL24/P hat in 1.0.11 unter Windows nicht geantwortet. Die

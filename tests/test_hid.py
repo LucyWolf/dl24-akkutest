@@ -78,9 +78,10 @@ def test_suchen_oeffnen_messen():
     assert g.erkennen() == "hid"
     assert v.wege[v.weg] == (PFAD, "roh"), v.wege[v.weg]          # die tote Schnittstelle übersprungen
     assert TOT in geschlossen
-    assert g.spannung_stellen == 3 and not g.kann_steuern and g.firmware == "1.1"
-    assert gesendet[0] == p.hid_anmelden()
-    assert gesendet[1] == p.hid_abfrage(3), gesendet[1].hex(" ")      # Adresse vom Gerät übernommen
+    assert g.spannung_stellen == 3 and g.kann_steuern and g.firmware == "1.1"
+    assert gesendet[0] == p.hid_abfrage(1), gesendet[0].hex(" ")
+    assert not any(x[3] in p.VERBOTEN for x in gesendet), "Update-Start oder Werkseinstellung gesendet"
+    assert not v._d.sim.update_modus
     werte = []
     g.bei_messwert = werte.append
     g.starten()
@@ -92,6 +93,27 @@ def test_suchen_oeffnen_messen():
     assert m.strom == 0.5 and m.an and 3.5 < m.spannung < 4.2, m      # Strom positiv, obwohl negativ gemeldet
 
 
+def test_sicherung_zu_viel_strom():
+    # Versteht das Gerät den Sollwert anders und zieht mehr, schaltet die App ab
+    v = verbindung.oeffnen(verbindung.hid_anschluesse()[0])
+    g = Geraet(v, intervall=0.05)
+    g.antwortzeit = 0.2
+    assert g.erkennen() == "hid"
+    sim = v._d.sim
+    fehler = []
+    g.bei_fehler = fehler.append
+    g.strom_setzen(0.5)
+    sim.soll_a = 3.0                     # das Gerät "versteht" 3 A
+    g.last(True)
+    g.starten()
+    time.sleep(0.6)
+    g.trennen()
+    assert fehler and "Sicherheitsabschaltung" in fehler[0], fehler
+    assert not sim.an
+
+
 if __name__ == "__main__":
     test_suchen_oeffnen_messen()
     print("ok test_suchen_oeffnen_messen")
+    test_sicherung_zu_viel_strom()
+    print("ok test_sicherung_zu_viel_strom")

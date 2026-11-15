@@ -47,10 +47,20 @@ def test_px100():
 
 def test_hid_befehle_wie_atorch_software():
     # So schickt sie Load_Application.exe V1.0.8 (aus dem Programm gelesen)
-    assert p.hid_anmelden() == bytes.fromhex("55 05 09 02 00 00 00 EE FF").ljust(64, b"\0")
-    assert p.hid_abfrage(1) == bytes.fromhex("55 05 01 05 0B 00 8C EE FF").ljust(64, b"\0")
-    assert p.hid_adresse_lesen(p.hid_adresse_bauen(7)) == 7
-    assert p.hid_adresse_lesen(p.hid_abfrage(1)) is None
+    assert p.hid_abfrage() == bytes.fromhex("55 05 01 05 0B 00 8C EE FF").ljust(64, b"\0")
+    # Update-Start (55 05 09 02, versehentlich in 1.0.11/1.0.12) und
+    # Werkseinstellung lassen sich gar nicht erst bauen
+    for verboten in ("55 05 09 02 00 00 00 EE FF", "55 05 01 33 00 00 00 00 EE FF"):
+        try:
+            p.hid_paket(bytes.fromhex(verboten))
+            raise AssertionError(verboten + " ließ sich bauen")
+        except ValueError:
+            pass
+    # Steuerbefehle, Zahlen als float32 (1,25 A = 3F A0 00 00)
+    assert p.hid_befehl(1, p.HID_SOLLWERT, p.hid_zahl(1.25))[:10] == bytes.fromhex("55 05 01 21 3F A0 00 00 EE FF")
+    assert p.hid_befehl(1, p.HID_LAST, b"\1\0\0\0")[:10] == bytes.fromhex("55 05 01 25 01 00 00 00 EE FF")
+    assert p.hid_befehl(1, p.HID_ZAEHLER_NULL)[:10] == bytes.fromhex("55 05 01 34 00 00 00 00 EE FF")
+    assert p.hid_befehl_lesen(p.hid_befehl(3, p.HID_ABSCHALT, p.hid_zahl(3.0))) == (3, 0x29, bytes.fromhex("40400000"))
 
 
 def test_hid_messwerte():

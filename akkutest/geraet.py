@@ -99,7 +99,9 @@ class Geraet:
         self.protokoll: str | None = None          # "px100", "atorch", "hid" oder "unbekannt"
         self.firmware: str | None = None
         self._letzte_hid = 0.0
-        self._hid_adresse = p.HID_ADRESSE_ANFANG
+        self._soll_a: float | None = None       # USB: zuletzt gesetzter Strom
+        self._zu_viel = 0
+        self._hid_adresse = p.HID_ADRESSE
         self._entwirrer = Entwirrer()
         self._antworten: queue.Queue = queue.Queue()
         self._atorch_gesehen = 0
@@ -114,7 +116,7 @@ class Geraet:
 
     @property
     def kann_steuern(self) -> bool:
-        return self.protokoll == "px100"
+        return self.protokoll in ("px100", "hid")
 
     @property
     def spannung_stellen(self) -> int:
@@ -146,22 +148,37 @@ class Geraet:
                 self._antworten.put((art, inhalt))
 
     def _hid_paket(self, daten: bytes) -> None:
-        adresse = p.hid_adresse_lesen(daten)
-        if adresse is not None:
-            self._antworten.put(("hid_adresse", adresse))
-            return
         w = p.hid_lesen(daten, self._hid_adresse)
         if w is None:
             return
         self._letzte_hid = time.monotonic()
         self.firmware = w.firmware
         if self.protokoll == "hid":
+            strom = abs(w.strom)              # das Gerät meldet Entladen negativ
+            self._strom_pruefen(w.an, strom)
             if self.bei_messwert:
-                strom = abs(w.strom)          # das Gerät meldet Entladen negativ
-                self.bei_messwert(Messwert(self.v.uhr(), w.spannung, strom, strom > 0.0005,
+                self.bei_messwert(Messwert(self.v.uhr(), w.spannung, strom, w.an,
                                            w.kapazitaet_mah, w.energie_wh, w.temp_mos))
         else:
             self._antworten.put(("hid", w))
+
+    def _strom_pruefen(self, an: bool, strom: float) -> None:
+        """Sicherung: fließt deutlich mehr als eingestellt, sofort aus. Die
+        USB-Befehle sind aus der Atorch-Software gelesen, nicht vom Hersteller
+        beschrieben - verstünde das Gerät eine Zahl anders, soll das keinen
+        Akku kosten."""
+        if not an or self._soll_a is None or strom <= self._soll_a * 1.3 + 0.1:
+            self._zu_viel = 0
+            return
+        self._zu_viel += 1
+        if self._zu_viel == 2:
+            log.error("USB: %.3f A statt %.3f A - schalte ab", strom, self._soll_a)
+            try:
+                self._senden(p.hid_befehl(self._hid_adresse, p.HID_LAST))
+            except Exception:
+                log.exception("Notabschaltung")
+            self._fehler(f"Sicherheitsabschaltung: Es flossen {strom:.3f} A statt {self._soll_a:.3f} A. "
+                         "Die Last wurde ausgeschaltet - bitte am Gerät prüfen.")
 
     def _fehler(self, text: str) -> None:
         self._laeuft = False
@@ -224,16 +241,12 @@ class Geraet:
             "Im Reiter „Diagnose“ steht, was über die Leitung kam.")
 
     def _hid_erkennen(self) -> str:
-        """USB-HID: anmelden (das Gerät nennt seine Adresse), dann abfragen.
-        Antwortet es nicht, den nächsten Weg probieren (siehe UsbHid)."""
+        """USB-HID: Messwerte abfragen, wie die Atorch-Software es im Takt tut.
+        Antwortet es nicht, den nächsten Weg probieren (siehe UsbHid).
+        Kein "Anmelden" vorweg - das vermeintliche Anmeldepaket war der
+        Update-Start (siehe protokoll.py)."""
         while True:
-            for _ in range(2):
-                a = self._frage(0, art="hid_adresse", paket=p.hid_anmelden())
-                if a is not None:
-                    self._hid_adresse = int(a)
-                    log.info("USB-HID: Gerät meldet Adresse %d", a)
-                    break
-            for _ in range(2):
+            for _ in range(3):
                 w = self._frage(0, art="hid", paket=p.hid_abfrage(self._hid_adresse))
                 if w is not None:
                     self.protokoll = "hid"
@@ -313,6 +326,14 @@ class Geraet:
                         werte.get("ah"), werte["wh"] / 1000 if "wh" in werte else None, werte.get("t"))
 
     # ---- Steuern ----
+    def _hid_setzen(self, befehl: int, daten: bytes = b"\0\0\0\0") -> bool:
+        # Das Gerät quittiert nicht. Ob es ankam, zeigt die nächste Abfrage
+        # (Last an/aus) bzw. das Display. Nicht warten: das hier läuft oft im
+        # Lesefaden, der die Antwort erst liefern müsste.
+        for _ in range(2):          # zweimal - ein verlorenes Paket fällt sonst nicht auf
+            self._senden(p.hid_befehl(self._hid_adresse, befehl, daten))
+        return True
+
     def _setzen(self, befehl: int, d1: int = 0, d2: int = 0) -> bool:
         if not self.kann_steuern:
             raise VerbindungsFehler("Dieses Gerät lässt sich nicht fernsteuern - bitte am Gerät bedienen.")
@@ -323,17 +344,26 @@ class Geraet:
         return False
 
     def last(self, ein: bool) -> bool:
+        if self.protokoll == "hid":
+            self._zu_viel = 0
+            return self._hid_setzen(p.HID_LAST, bytes([1 if ein else 0, 0, 0, 0]))
         return self._setzen(p.PX_EIN_AUS, 1 if ein else 0)
 
     def strom_setzen(self, ampere: float) -> bool:
+        if self.protokoll == "hid":
+            self._soll_a = ampere
+            return self._hid_setzen(p.HID_SOLLWERT, p.hid_zahl(ampere))
         return self._setzen(p.PX_STROM_SETZEN, *p.px_zahl_mit_hundertsteln(ampere))
 
     def abschaltung_setzen(self, volt: float) -> bool:
+        if self.protokoll == "hid":
+            return self._hid_setzen(p.HID_ABSCHALT, p.hid_zahl(volt))
         return self._setzen(p.PX_ABSCHALT_SETZEN, *p.px_zahl_mit_hundertsteln(volt))
 
     def zaehler_null(self) -> None:
         if self.protokoll == "hid":
-            return            # den Befehl dafür kennen wir über USB noch nicht
+            self._hid_setzen(p.HID_ZAEHLER_NULL)
+            return
         if self.kann_steuern:
             self._setzen(p.PX_ZAEHLER_NULL)
         else:

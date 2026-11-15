@@ -199,6 +199,9 @@ class UsbHid(Verbindung):
         with self._sperre:
             if not self._d:
                 raise VerbindungsFehler("nicht verbunden")
+            from .protokoll import HID_HIN, VERBOTEN
+            if len(daten) >= 4 and daten[0] == HID_HIN and daten[3] in VERBOTEN:
+                raise VerbindungsFehler(f"Befehl {daten[3]:02X} ist gesperrt (Update/Werkseinstellung)")
             art = self.wege[self.weg][1]
             paket = (b"\x00" + bytes(daten)) if art == "null" else bytes(daten)
             try:

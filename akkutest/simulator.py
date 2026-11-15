@@ -52,7 +52,8 @@ class SimDL24:
         # "px100": beides, "atorch": nur Berichte, "fremd": unbekannt,
         # "hid": USB-HID des DL24/P (antwortet nur auf Fragen, ganze 64-Byte-Pakete)
         self.protokoll = protokoll
-        self.hid_adresse = 3
+        self.hid_adresse = p.HID_ADRESSE
+        self.update_modus = False          # darf in keinem Test True werden
         self.tempo = tempo
         self.bericht_s = bericht_s
         self.an = False
@@ -147,9 +148,27 @@ class SimDL24:
     def _hid(self, b: bytes) -> None:
         if len(b) != p.HID_LAENGE or b[0] != p.HID_HIN or b[1] != p.HID_FAMILIE:
             return
-        if b[3] == p.HID_ANMELDEN:
-            antwort = p.hid_adresse_bauen(self.hid_adresse)
-        elif b[3] == p.HID_MESSWERTE and b[2] == self.hid_adresse:
+        befehl = p.hid_befehl_lesen(b)
+        if befehl and befehl[0] == self.hid_adresse and befehl[1] in (
+                p.HID_LAST, p.HID_SOLLWERT, p.HID_ABSCHALT, p.HID_ZAEHLER_NULL):
+            import struct
+            _, art, d = befehl
+            if art == p.HID_LAST:
+                self.an = d[0] == 1
+            elif art == p.HID_SOLLWERT:
+                self.soll_a = struct.unpack(">f", d)[0]
+            elif art == p.HID_ABSCHALT:
+                self.abschalt_v = struct.unpack(">f", d)[0]
+            else:
+                self.mah = self.wh = self.sek = 0.0
+            return                         # keine Quittung - wie das echte Gerät
+        if b[3] == p.HID_UPDATE_START:
+            self.update_modus = True       # wie das echte Gerät: ab jetzt Bootloader
+            self.an = False
+            return
+        if self.update_modus:
+            return
+        if b[3] == p.HID_MESSWERTE and b[2] == self.hid_adresse:
             u, i = self.spannung(), self.strom()
             antwort = p.hid_bauen(p.HidWerte(
                 spannung=u, strom=-i, leistung=u * i, widerstand=u / i if i else 9999.991,
