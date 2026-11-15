@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.14 – 15.11.2026
+
+- Die Statuszeile zeigte über USB „Firmware 0.0“. Das Feld im Messpaket ist bei
+  Firmware v1.1.0 leer; die Fassung steht nur im Gerätenamen
+  („ATORCH DL24 V1.1.0“) und wird jetzt von dort gelesen.
+- Am echten DL24P (Firmware v1.1.0) geprüft: Messwerte über USB stimmen mit dem
+  Display überein, 3 Nachkommastellen bei der Spannung.
+- Korrektur zum Hinweis bei 1.0.13: Ein Gerät im Update-Modus kann durchaus
+  Schaden nehmen, wenn danach ein Update angefangen und abgebrochen wird. Dann
+  hilft nur das Neuaufspielen über den Notfallmodus des Chips.
+
 ## 1.0.13 – 15.11.2026
 
 - **Wichtig für 1.0.11 und 1.0.12:** Beim Verbinden über USB schickten sie ein

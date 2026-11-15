@@ -36,7 +36,7 @@ class FalschesGeraet:
         return "ATORCH"
 
     def get_product_string(self):
-        return "ATORCH_USB_TESTER"
+        return "ATORCH DL24 V1.1.0"    # wie das echte Gerät; Byte 0x36 ist dort 0
 
     def read(self, n, timeout_ms=0):
         try:
@@ -78,7 +78,7 @@ def test_suchen_oeffnen_messen():
     assert g.erkennen() == "hid"
     assert v.wege[v.weg] == (PFAD, "roh"), v.wege[v.weg]          # die tote Schnittstelle übersprungen
     assert TOT in geschlossen
-    assert g.spannung_stellen == 3 and g.kann_steuern and g.firmware == "1.1"
+    assert g.spannung_stellen == 3 and g.kann_steuern and g.firmware == "1.1.0"
     assert gesendet[0] == p.hid_abfrage(1), gesendet[0].hex(" ")
     assert not any(x[3] in p.VERBOTEN for x in gesendet), "Update-Start oder Werkseinstellung gesendet"
     assert not v._d.sim.update_modus

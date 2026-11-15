@@ -282,7 +282,8 @@ def hid_lesen(paket: bytes, adresse: int | None = None) -> HidWerte | None:
     for bit, i in ((0x40, 6), (0x20, 7), (0x10, 8)):
         if zeichen & bit:
             w[i] = -w[i]
-    return HidWerte(*w, an=p[0x34] != 0, firmware=f"{p[0x36] // 10}.{p[0x36] % 10}")
+    return HidWerte(*w, an=p[0x34] != 0, firmware=f"{p[0x36] // 10}.{p[0x36] % 10}" if p[0x36] else "")
+    # Byte 0x36 ist bei Firmware v1.1.0 leer (0) - dann steht die Fassung nur im Gerätenamen
 
 
 def hid_bauen(w: HidWerte, adresse: int = HID_ADRESSE) -> bytes:
@@ -297,8 +298,9 @@ def hid_bauen(w: HidWerte, adresse: int = HID_ADRESSE) -> bytes:
             zeichen |= {1: 0x80, 6: 0x40, 7: 0x20, 8: 0x10}.get(n, 0)
         p[i:i + 4] = round(abs(wert) * 1000).to_bytes(4, "little")
     p[0x34] = 1 if w.an else 0
-    haupt, neben = w.firmware.split(".")
-    p[0x36] = int(haupt) * 10 + int(neben)
+    if w.firmware:
+        haupt, neben = w.firmware.split(".")
+        p[0x36] = int(haupt) * 10 + int(neben)
     p[0x3C] = zeichen
     return bytes(p)
 

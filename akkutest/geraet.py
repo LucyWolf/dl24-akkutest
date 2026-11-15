@@ -8,6 +8,7 @@ sieht man dort, was es wirklich schickt.
 from __future__ import annotations
 
 import logging
+import re
 import queue
 import threading
 import time
@@ -152,7 +153,8 @@ class Geraet:
         if w is None:
             return
         self._letzte_hid = time.monotonic()
-        self.firmware = w.firmware
+        if w.firmware:
+            self.firmware = w.firmware
         if self.protokoll == "hid":
             strom = abs(w.strom)              # das Gerät meldet Entladen negativ
             self._strom_pruefen(w.an, strom)
@@ -250,6 +252,12 @@ class Geraet:
                 w = self._frage(0, art="hid", paket=p.hid_abfrage(self._hid_adresse))
                 if w is not None:
                     self.protokoll = "hid"
+                    if not self.firmware:
+                        # Gerätename, z. B. "ATORCH DL24 V1.1.0"
+                        for zeile in getattr(self.v, "info", []):
+                            m = re.search(r"\bV(\d+(?:\.\d+)+)", zeile)
+                            if m:
+                                self.firmware = m.group(1)
                     log.info("USB-HID: Messwerte kommen (Firmware %s) über %s",
                              self.firmware, getattr(self.v, "weg_text", "?"))
                     return self.protokoll
