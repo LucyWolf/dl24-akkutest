@@ -73,7 +73,9 @@ def test_hid_messwerte():
     roh[0x34], roh[0x36], roh[0x3C] = 1, 11, 0x80 | 0x40
     w = p.hid_lesen(bytes(roh), 1)
     assert w and w.spannung == 4.697 and w.strom == -0.999 and w.kapazitaet_mah == 1160.062, w
-    assert w.temp_fuehler == -46.391 and w.temp_mos == 35.505 and w.an and w.firmware == "1.1", w
+    # Byte 32 / 36 / 40
+    assert w.temp_mos == -46.391 and w.temp_fuehler == 31 and w.temp_drei == 35.505, w
+    assert w.an and w.firmware == "1.1", w
     assert p.hid_lesen(bytes(roh), 2) is None                 # andere Adresse
     assert p.hid_lesen(bytes(roh[1:]) + b"\0", 1).spannung == 4.697   # ohne Report-ID
     assert p.hid_lesen(p.hid_bauen(w, 1), 1) == w

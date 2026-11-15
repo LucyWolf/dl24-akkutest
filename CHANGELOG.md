@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.24 – 15.11.2026
+
+- **Temperaturfühler richtig zugeordnet:** Am echten DL24P (Firmware 1.1.0)
+  geprüft – der angesteckte Fühler kommt in Byte 36, der Kühler (MOSFET) in
+  Byte 32. Vorher war es nach der Atorch-Software verdreht: Als „Fühler“ wurde
+  die Kühlertemperatur angezeigt und ausgewertet. Byte 40 heißt vorerst
+  „Temperatur 3 (unbekannt)“.
+
 ## 1.0.23 – 15.11.2026
 
 - **Ampel für die Spannung:** grün, gelb, rot – im Diagramm als farbige Bänder,

@@ -85,8 +85,8 @@ class SteuerungReiter(QWidget):
         self.anz = {}
         for i, (k, t) in enumerate([("u", "Spannung"), ("i", "Strom"), ("p", "Leistung"), ("r", "Widerstand"),
                                     ("mah", "Kapazität (Gerät)"), ("wh", "Energie (Gerät)"),
-                                    ("t", "Temperatur Kühler (MOS)"), ("tf", "Temperatur Fühler"),
-                                    ("tc", "Temperatur CPU")]):
+                                    ("t", "Temperatur Kühler (MOS)"), ("tf", "Temperatur Fühler (extern)"),
+                                    ("tc", "Temperatur 3 (unbekannt)")]):
             self.anz[k] = Anzeige(t)
             raster.addWidget(self.anz[k], i // 4, i % 4)
         rechts.addLayout(raster)
@@ -128,7 +128,7 @@ class SteuerungReiter(QWidget):
         a["wh"].setzen(zahl(m.wh_geraet, 3, "Wh") if m.wh_geraet is not None else "–")
         a["t"].setzen(zahl(m.temperatur, 0, "°C") if m.temperatur is not None else "–")
         a["tf"].setzen(zahl(m.temp_fuehler, 1, "°C") if m.temp_fuehler is not None else "kein Fühler")
-        a["tc"].setzen(zahl(m.temp_cpu, 1, "°C") if m.temp_cpu is not None else "–")
+        a["tc"].setzen(zahl(m.temp_drei, 1, "°C") if m.temp_drei is not None else "–")
         if m.temp_roh:
             self.temp_roh.setText("Rohwerte vom Gerät (Byte 32/36/40): " +
                                   " · ".join(zahl(x, 3, "°C") for x in m.temp_roh))

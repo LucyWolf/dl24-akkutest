@@ -252,9 +252,12 @@ class HidWerte:
     widerstand: float    # Ω
     energie_wh: float    # Wh
     kapazitaet_mah: float  # mAh
-    temp_fuehler: float  # °C - ohne angesteckten Fühler unsinnig (-46)
-    temp_cpu: float
+    # Reihenfolge = Byte 32, 36, 40. Am DL24P mit Firmware 1.1.0 geprüft (15.11.2026):
+    # Byte 36 folgt dem angesteckten Fühler, Byte 32 dem Kühler. Byte 40 ist noch unbelegt.
+    # (Die Atorch-Software nennt sie anders - die Namen von dort stimmten nicht.)
     temp_mos: float
+    temp_fuehler: float
+    temp_drei: float
     luefter: float       # U/min
     an: bool
     firmware: str
@@ -291,7 +294,7 @@ def hid_bauen(w: HidWerte, adresse: int = HID_ADRESSE) -> bytes:
     p = bytearray(HID_LAENGE)
     p[0:4] = bytes([HID_ZURUECK, HID_FAMILIE, adresse, HID_MESSWERTE])
     werte = [w.spannung, w.strom, w.leistung, w.widerstand, w.energie_wh, w.kapazitaet_mah,
-             w.temp_fuehler, w.temp_cpu, w.temp_mos, w.luefter]
+             w.temp_mos, w.temp_fuehler, w.temp_drei, w.luefter]
     zeichen = 0
     for n, (i, wert) in enumerate(zip(range(8, 48, 4), werte)):
         if wert < 0:

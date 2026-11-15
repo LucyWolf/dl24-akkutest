@@ -212,7 +212,7 @@ class SimDL24:
                 spannung=u, strom=-i, leistung=u * i, widerstand=u / i if i else 9999.991,
                 energie_wh=self.wh, kapazitaet_mah=self.mah,
                 temp_fuehler=getattr(self.akku, "temperatur", None) or -46.388,
-                temp_cpu=28.0, temp_mos=25 + u * i * 0.4, luefter=0, an=self.an, firmware=""),
+                temp_drei=28.0, temp_mos=25 + u * i * 0.4, luefter=0, an=self.an, firmware=""),
                 self.hid_adresse)
         else:
             return
