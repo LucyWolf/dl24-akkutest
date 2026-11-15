@@ -14,8 +14,9 @@ echte Kapazität messen und sehen, wie viel sie gegenüber neu verloren haben.
   **Verlust**, **Innenwiderstand**, Bewertung
 - **Verlauf** je Akku: alle Tests mit Kapazität über die Zeit und übereinander
   gelegten Entladekurven, Export als CSV
-- **USB und Bluetooth** (BLE; ältere Geräte mit Kopplungs-PIN erscheinen nach
-  dem Koppeln als serieller Anschluss)
+- **USB und Bluetooth**: DL24/P mit Farbdisplay über das USB-Kabel (Spannung
+  auf 1 mV genau) oder per Bluetooth (BLE, nur 0,1 V); ältere Geräte mit
+  CH340-Chip als serieller Anschluss
 - **Simulator** zum Ausprobieren ohne Gerät
 - **Diagnose**-Reiter: zeigt roh, was über die Leitung geht
 
@@ -30,9 +31,25 @@ Im [neuesten Release](../../releases/latest):
 - **Windows**: `dl24-akkutest-setup.exe`. SmartScreen warnt vor unsignierten
   Programmen: „Weitere Informationen → Trotzdem ausführen“.
 
-### USB unter Linux
+### USB
 
-Der DL24 meldet sich als `/dev/ttyUSB0` (Chip CH340). Dein Benutzer braucht
+Der **DL24/P mit 2,4"-Farbdisplay** meldet sich am USB-Kabel nicht als
+COM-Anschluss, sondern als HID-Gerät (`0483:5750`). Er steht in der Liste als
+„USB: … (genau, 1 mV)“. Über diesen Weg kommt die Spannung so genau wie auf dem
+Display – über Bluetooth nur auf 0,1 V. Die Atorch-PC-Software muss dafür
+geschlossen sein, sie hält das Gerät sonst fest.
+
+Unter Linux braucht der Benutzer Zugriff auf das HID-Gerät, einmal:
+
+```bash
+echo 'KERNEL=="hidraw*", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5750", TAG+="uaccess"' \
+  | sudo tee /etc/udev/rules.d/70-dl24.rules
+sudo udevadm control --reload && sudo udevadm trigger
+```
+
+Danach das Kabel ab- und wieder anstecken.
+
+Ältere DL24 mit CH340-Chip melden sich als `/dev/ttyUSB0`. Dein Benutzer braucht
 Zugriff darauf – unter Arch/CachyOS über die Gruppe `uucp`, unter
 Debian/Ubuntu über `dialout`:
 

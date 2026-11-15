@@ -45,6 +45,30 @@ def test_px100():
     assert p.px_antwort_wert(bytes.fromhex("CACB001068CECE")) is None
 
 
+def test_hid_befehle_wie_atorch_software():
+    # So schickt sie Load_Application.exe V1.0.8 (aus dem Programm gelesen)
+    assert p.hid_anmelden() == bytes.fromhex("55 05 09 02 00 00 00 EE FF").ljust(64, b"\0")
+    assert p.hid_abfrage(1) == bytes.fromhex("55 05 01 05 0B 00 8C EE FF").ljust(64, b"\0")
+    assert p.hid_adresse_lesen(p.hid_adresse_bauen(7)) == 7
+    assert p.hid_adresse_lesen(p.hid_abfrage(1)) is None
+
+
+def test_hid_messwerte():
+    # Zeile aus der Beispieldatei der Atorch-Software (DL24P, 02.09.2025):
+    # 4,697 V, 0,999 A, 4,695 W, 4,698 Ω, 5,048 Wh, 1160,062 mAh, -46,391 / 31 / 35,505 °C
+    roh = bytearray(64)
+    roh[0:4] = b"\xaa\x05\x01\x05"
+    for i, wert in zip(range(8, 48, 4), (4697, 999, 4695, 4698, 5048, 1160062, 46391, 31000, 35505, 1650)):
+        roh[i:i + 4] = wert.to_bytes(4, "little")
+    roh[0x34], roh[0x36], roh[0x3C] = 1, 11, 0x80 | 0x40
+    w = p.hid_lesen(bytes(roh), 1)
+    assert w and w.spannung == 4.697 and w.strom == -0.999 and w.kapazitaet_mah == 1160.062, w
+    assert w.temp_fuehler == -46.391 and w.temp_mos == 35.505 and w.an and w.firmware == "1.1", w
+    assert p.hid_lesen(bytes(roh), 2) is None                 # andere Adresse
+    assert p.hid_lesen(bytes(roh[1:]) + b"\0", 1).spannung == 4.697   # ohne Report-ID
+    assert p.hid_lesen(p.hid_bauen(w, 1), 1) == w
+
+
 def test_entwirrer_gemischt_und_zerstueckelt():
     bericht = p.atorch_bauen(p.AtorchWerte(4.1, 1.0, 100, 0, 25, 60))
     strom = (b"\x12\x34" + bericht + p.px_antwort_bauen(4100) + bytes([p.PX_OK])

@@ -49,7 +49,10 @@ class SimDL24:
 
     def __init__(self, akku: SimAkku, protokoll="px100", tempo=1.0, bericht_s=1.0):
         self.akku = akku
-        self.protokoll = protokoll        # "px100": beides, "atorch": nur Berichte, "fremd": unbekannt
+        # "px100": beides, "atorch": nur Berichte, "fremd": unbekannt,
+        # "hid": USB-HID des DL24/P (antwortet nur auf Fragen, ganze 64-Byte-Pakete)
+        self.protokoll = protokoll
+        self.hid_adresse = 3
         self.tempo = tempo
         self.bericht_s = bericht_s
         self.an = False
@@ -88,6 +91,9 @@ class SimDL24:
     def empfangen(self, daten: bytes) -> None:
         # Befehle kommen als ganze 6-Byte-Stücke (PX100) oder 10 Byte (Atorch)
         with self._sperre:
+            if self.protokoll == "hid":
+                self._hid(daten)
+                return
             i = 0
             while i < len(daten):
                 if daten[i:i + 2] == b"\xb1\xb2" and len(daten) - i >= 6:
@@ -138,6 +144,24 @@ class SimDL24:
         if senden:
             senden(antwort)
 
+    def _hid(self, b: bytes) -> None:
+        if len(b) != p.HID_LAENGE or b[0] != p.HID_HIN or b[1] != p.HID_FAMILIE:
+            return
+        if b[3] == p.HID_ANMELDEN:
+            antwort = p.hid_adresse_bauen(self.hid_adresse)
+        elif b[3] == p.HID_MESSWERTE and b[2] == self.hid_adresse:
+            u, i = self.spannung(), self.strom()
+            antwort = p.hid_bauen(p.HidWerte(
+                spannung=u, strom=-i, leistung=u * i, widerstand=u / i if i else 9999.991,
+                energie_wh=self.wh, kapazitaet_mah=self.mah, temp_fuehler=-46.388,
+                temp_cpu=28.0, temp_mos=25 + u * i * 0.4, luefter=0, an=self.an, firmware="1.1"),
+                self.hid_adresse)
+        else:
+            return
+        senden = self.senden
+        if senden:
+            senden(antwort)
+
     def bericht(self) -> bytes:
         with self._sperre:
             return p.atorch_bauen(p.AtorchWerte(
@@ -160,7 +184,7 @@ class SimDL24:
             jetzt = time.monotonic()
             self.schritt((jetzt - vorher) * self.tempo)
             vorher = jetzt
-            if jetzt >= naechster_bericht:
+            if jetzt >= naechster_bericht and self.protokoll != "hid":
                 naechster_bericht = jetzt + self.bericht_s
                 senden = self.senden          # kann beim Trennen gerade None werden
                 if senden:
@@ -183,6 +207,7 @@ class SimulatorVerbindung(Verbindung):
                               protokoll=v.get("protokoll", protokoll),
                               tempo=tempo or v.get("tempo", 60.0),
                               bericht_s=bericht_s or v.get("bericht_s", 1.0))
+        self.pakete = self.geraet.protokoll == "hid"
 
     def uhr(self) -> float:
         return self.geraet.simzeit

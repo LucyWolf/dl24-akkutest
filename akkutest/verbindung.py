@@ -1,6 +1,7 @@
-"""Der Draht zum Gerät: USB (seriell), Bluetooth LE oder der eingebaute Simulator.
+"""Der Draht zum Gerät: USB-HID (DL24/P), USB seriell, Bluetooth LE oder der
+eingebaute Simulator.
 
-Alle drei sehen nach oben gleich aus: öffnen, schreiben, schließen - und wer
+Alle sehen nach oben gleich aus: öffnen, schreiben, schließen - und wer
 Daten empfangen will, setzt `bei_daten`. Was in den Bytes steht, weiß erst
 geraet.py.
 
@@ -31,7 +32,7 @@ class VerbindungsFehler(Exception):
 
 @dataclass
 class Anschluss:
-    art: str        # "usb", "ble", "sim"
+    art: str        # "hid", "usb", "ble", "sim"
     adresse: str    # /dev/ttyUSB0, COM3, BLE-Adresse, "sim"
     name: str       # was in der Liste steht
     geraet: object = None   # BLE: das Gerät aus der Suche (bleak.BLEDevice)
@@ -41,6 +42,10 @@ class Anschluss:
 
 
 class Verbindung:
+    # True: jedes Stück bei `bei_daten` ist ein ganzes Paket (USB-HID).
+    # Sonst ein Datenstrom, den geraet.py erst zerlegen muss.
+    pakete = False
+
     def __init__(self) -> None:
         self.info: list[str] = []        # Textzeilen für den Diagnose-Reiter
         self.bei_daten: Callable[[bytes], None] | None = None
@@ -61,6 +66,102 @@ class Verbindung:
     def oeffnen(self) -> None: ...
     def schreiben(self, daten: bytes) -> None: ...
     def schliessen(self) -> None: ...
+
+
+# --------------------------------------------------------------------------
+# USB-HID (DL24/P mit Farbdisplay: am Kabel kein COM-Anschluss, sondern HID)
+# --------------------------------------------------------------------------
+
+def hid_hinweis() -> str:
+    if sys.platform.startswith("linux"):
+        return ("Kein Zugriff auf den DL24 über USB.\n\n"
+                "Linux lässt normale Benutzer nicht an HID-Geräte. Einmal im Terminal:\n\n"
+                "    echo 'KERNEL==\"hidraw*\", ATTRS{idVendor}==\"0483\", ATTRS{idProduct}==\"5750\", "
+                "TAG+=\"uaccess\"' | sudo tee /etc/udev/rules.d/70-dl24.rules\n"
+                "    sudo udevadm control --reload && sudo udevadm trigger\n\n"
+                "Danach das USB-Kabel einmal ab- und wieder anstecken.")
+    return ("Der DL24 lässt sich über USB nicht öffnen.\n\n"
+            "Ist die Atorch-PC-Software noch offen? Sie hält das Gerät fest - erst schließen.")
+
+
+class UsbHid(Verbindung):
+    pakete = True
+
+    def __init__(self, pfad: str) -> None:
+        super().__init__()
+        self.pfad = pfad
+        self._d = None
+        self._laeuft = False
+        self._schreib_sperre = threading.Lock()
+
+    def oeffnen(self) -> None:
+        try:
+            import hid
+        except ImportError as e:
+            raise VerbindungsFehler("USB-HID fehlt in dieser Fassung (Paket „hidapi“).") from e
+        try:
+            d = hid.device()
+            d.open_path(self.pfad.encode() if isinstance(self.pfad, str) else self.pfad)
+        except Exception as e:
+            raise VerbindungsFehler(hid_hinweis() + f"\n\n({e})") from e
+        self._d = d
+        try:
+            self.info.append(f"USB-HID: {d.get_manufacturer_string() or '?'} / {d.get_product_string() or '?'}")
+        except Exception:
+            pass
+        self._laeuft = True
+        threading.Thread(target=self._lesen, name="hid", daemon=True).start()
+
+    def _lesen(self) -> None:
+        while self._laeuft:
+            try:
+                daten = self._d.read(64, 200)
+            except Exception as e:
+                if self._laeuft:
+                    self._laeuft = False
+                    self._abgerissen(f"USB-Verbindung getrennt ({e})")
+                return
+            if daten:
+                self._empfangen(bytes(daten))
+
+    def schreiben(self, daten: bytes) -> None:
+        if not self._d:
+            raise VerbindungsFehler("nicht verbunden")
+        with self._schreib_sperre:
+            try:
+                n = self._d.write(bytes(daten))
+            except Exception as e:
+                raise VerbindungsFehler(f"USB: senden ging nicht ({e})") from e
+        if n is not None and n < 0:
+            raise VerbindungsFehler("USB: senden ging nicht")
+
+    def schliessen(self) -> None:
+        self._laeuft = False
+        if self._d:
+            try:
+                self._d.close()
+            except Exception:
+                pass
+            self._d = None
+
+
+def hid_anschluesse() -> list[Anschluss]:
+    try:
+        import hid
+        from .protokoll import HID_PID, HID_VID
+        geraete = hid.enumerate(HID_VID, HID_PID)
+    except Exception:
+        return []
+    aus, gesehen = [], set()
+    for g in geraete:
+        pfad = g.get("path")
+        if not pfad or pfad in gesehen:
+            continue
+        gesehen.add(pfad)
+        pfad = pfad.decode(errors="replace") if isinstance(pfad, bytes) else str(pfad)
+        name = g.get("product_string") or "DL24"
+        aus.append(Anschluss("hid", pfad, f"USB: {name} (genau, 1 mV)"))
+    return aus
 
 
 # --------------------------------------------------------------------------
@@ -318,8 +419,10 @@ class Bluetooth(Verbindung):
 # --------------------------------------------------------------------------
 
 def oeffnen(anschluss: Anschluss) -> Verbindung:
-    if anschluss.art == "usb":
-        v: Verbindung = Seriell(anschluss.adresse)
+    if anschluss.art == "hid":
+        v: Verbindung = UsbHid(anschluss.adresse)
+    elif anschluss.art == "usb":
+        v = Seriell(anschluss.adresse)
     elif anschluss.art == "ble":
         v = Bluetooth(anschluss.adresse, anschluss.geraet)
     elif anschluss.art == "sim":

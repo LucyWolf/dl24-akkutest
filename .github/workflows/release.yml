@@ -59,7 +59,7 @@ jobs:
         run: >
           pyinstaller --onefile --name dl24-akkutest-linux
           --add-data "akkutest/VERSION:akkutest" --add-data "icon.png:."
-          --collect-submodules bleak --collect-submodules dbus_fast
+          --collect-submodules bleak --collect-submodules dbus_fast --hidden-import hid
           --exclude-module tkinter --exclude-module unittest
           start.py
       - name: Gebündeltes Programm prüfen
@@ -86,7 +86,7 @@ jobs:
         run: >
           pyinstaller --onedir --noconsole --name DL24-Akkutest --icon icon.ico
           --add-data "akkutest/VERSION;akkutest" --add-data "icon.png;."
-          --collect-submodules bleak --collect-submodules winrt
+          --collect-submodules bleak --collect-submodules winrt --hidden-import hid
           --exclude-module tkinter --exclude-module unittest
           start.py
       # Ohne Konsole gibt es keine Ausgabe - gewertet wird die Rückgabe

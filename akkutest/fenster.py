@@ -144,7 +144,7 @@ class Fenster(QMainWindow):
         self.anschluss.setMinimumWidth(340)
         h.addWidget(self.anschluss, 1)
         self.knopf_neu = QPushButton("↻")
-        self.knopf_neu.setToolTip("USB-Anschlüsse neu einlesen")
+        self.knopf_neu.setToolTip("USB neu einlesen (DL24 über das USB-Kabel: genaue Spannung)")
         self.knopf_neu.clicked.connect(self.anschluesse_laden)
         h.addWidget(self.knopf_neu)
         self.knopf_ble = QPushButton("Bluetooth suchen")
@@ -161,7 +161,7 @@ class Fenster(QMainWindow):
     def anschluesse_laden(self) -> None:
         vorher = self.anschluss.currentData()
         self.anschluss.clear()
-        liste = verbindung.serielle_anschluesse() + self._ble
+        liste = verbindung.hid_anschluesse() + verbindung.serielle_anschluesse() + self._ble
         for a in liste:
             self.anschluss.addItem(a.name, a)
         self.anschluss.addItem("Simulator – ausprobieren ohne Gerät", verbindung.Anschluss("sim", "sim:px100", "Simulator"))
@@ -281,7 +281,10 @@ class Fenster(QMainWindow):
             if g.protokoll == "unbekannt":
                 self.status.setText("✔ verbunden – Format unbekannt (Daten werden mitgeschrieben)")
             else:
-                art = "fernsteuerbar (PX100)" if g.kann_steuern else "nur Messwerte (Atorch-Bericht)"
+                if g.protokoll == "hid":
+                    art = "USB, nur Messwerte" + (f" (Firmware {g.firmware})" if g.firmware else "")
+                else:
+                    art = "fernsteuerbar (PX100)" if g.kann_steuern else "nur Messwerte (Atorch-Bericht)"
                 self.status.setText(f"✔ verbunden – {art}")
         else:
             self.status.setText("nicht verbunden")
@@ -575,10 +578,11 @@ class Fenster(QMainWindow):
     def _messwert(self, m: Messwert) -> None:
         self.letzter = m
         a = self.anz
-        # Im Atorch-Bericht kommt die Spannung nur in 0,1-V-Schritten - drei
-        # Nachkommastellen täuschten eine Genauigkeit vor, die es nicht gibt
-        fein = bool(self.geraet and self.geraet.kann_steuern)
-        a["u"].setzen(zahl(m.spannung, 3 if fein else 1, "V"))
+        # Im Atorch-Bericht (Bluetooth) kommt die Spannung nur in 0,1-V-Schritten -
+        # drei Nachkommastellen täuschten eine Genauigkeit vor, die es nicht gibt.
+        # Über USB kommt sie auf 1 mV genau.
+        stellen = self.geraet.spannung_stellen if self.geraet else 3
+        a["u"].setzen(zahl(m.spannung, stellen, "V"))
         a["i"].setzen(zahl(m.strom, 3, "A"))
         a["p"].setzen(zahl(m.leistung, 2, "W"))
         a["t"].setzen(zahl(m.temperatur, 0, "°C") if m.temperatur is not None else "–")
@@ -890,7 +894,9 @@ def pruefen() -> int:
     print(f"DL24 Akkutest {VERSION}")
     import serial  # noqa: F401
     import bleak   # noqa: F401
-    print("pyserial, bleak, pyqtgraph: da")
+    import hid     # noqa: F401  - USB-HID; die native Bibliothek muss im Bündel mit
+    hid.enumerate(0x0483, 0x5750)
+    print("pyserial, bleak, hidapi, pyqtgraph: da")
     from .simulator import SimAkku, SimulatorVerbindung
     v = SimulatorVerbindung(akku=SimAkku(mah=500), tempo=500, bericht_s=0.02)
     v.oeffnen()

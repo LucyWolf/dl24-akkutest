@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.11 – 15.11.2026
+
+- **USB am DL24/P** (Farbdisplay): Das Gerät meldet sich am Kabel als
+  HID-Gerät, nicht als COM-Anschluss. Die App findet es jetzt selbst und liest
+  darüber Spannung und Strom auf 1 mV / 1 mA genau – so wie auf dem Display.
+  Über Bluetooth kommt die Spannung nur in 0,1-V-Schritten. Das Protokoll
+  stammt aus der Atorch-PC-Software; der DL24 meldet Entladestrom negativ,
+  die App zeigt ihn positiv.
+- Über USB fragt die App zweimal je Sekunde statt einmal.
+
 ## 1.0.10 – 14.11.2026
 
 - Geräte, die nur Messwerte schicken (Atorch-Bericht), übertragen die

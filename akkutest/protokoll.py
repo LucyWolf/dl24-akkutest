@@ -168,3 +168,114 @@ def px_antwort_bauen(wert: int) -> bytes:
 
 def hex_text(daten: bytes) -> str:
     return daten.hex(" ").upper()
+
+
+# --------------------------------------------------------------------------
+# USB-HID (DL24/P über das USB-Kabel)
+# --------------------------------------------------------------------------
+# Herausgelesen aus der Atorch-PC-Software "Load_Application" V1.0.8
+# (15.11.2026). Der DL24/P meldet sich am USB nicht als COM-Anschluss, sondern
+# als HID-Gerät 0483:5750. Es spricht nur, wenn es gefragt wird: 64-Byte-Pakete,
+# das erste Byte ist die Report-ID (hin 55, zurück AA).
+#
+#   Anmelden:  55 05 09 02 00 00 00 EE FF       -> AA 05 <adr> 04 01 .. .. .. EE FF
+#   Abfragen:  55 05 <adr> 05 0B 00 8C EE FF    -> AA 05 <adr> 05 + 60 Byte Messwerte
+#
+# Die Messwerte sind 32-Bit-Zahlen (little endian) in Tausendsteln, ab Byte 8:
+# Spannung, Strom, Leistung, Widerstand, Wh, mAh, Fühler-, CPU-, MOSFET-Temperatur,
+# Lüfter. Vorzeichen stehen getrennt in Byte 60. Über USB kommt die Spannung
+# damit auf 1 mV genau - über Bluetooth nur auf 0,1 V.
+
+HID_VID = 0x0483
+HID_PID = 0x5750
+HID_LAENGE = 64
+HID_HIN = 0x55
+HID_ZURUECK = 0xAA
+HID_FAMILIE = 0x05
+HID_ANMELDEN = 0x02
+HID_ADRESSE = 0x04          # Antwort auf das Anmelden
+HID_MESSWERTE = 0x05
+HID_ADRESSE_ANFANG = 0x01   # bis das Gerät seine meldet
+
+
+def hid_paket(inhalt: bytes) -> bytes:
+    return bytes(inhalt).ljust(HID_LAENGE, b"\x00")
+
+
+def hid_anmelden() -> bytes:
+    return hid_paket(bytes([HID_HIN, HID_FAMILIE, 0x09, HID_ANMELDEN, 0, 0, 0, 0xEE, 0xFF]))
+
+
+def hid_abfrage(adresse: int) -> bytes:
+    return hid_paket(bytes([HID_HIN, HID_FAMILIE, adresse & 0xFF, HID_MESSWERTE, 0x0B, 0x00, 0x8C, 0xEE, 0xFF]))
+
+
+@dataclass
+class HidWerte:
+    spannung: float      # V   (0,001 V)
+    strom: float         # A   (0,001 A; das Gerät meldet Entladen negativ)
+    leistung: float      # W
+    widerstand: float    # Ω
+    energie_wh: float    # Wh
+    kapazitaet_mah: float  # mAh
+    temp_fuehler: float  # °C - ohne angesteckten Fühler unsinnig (-46)
+    temp_cpu: float
+    temp_mos: float
+    luefter: float       # U/min
+    an: bool
+    firmware: str
+
+
+def _hid_anfang(paket: bytes) -> bytes | None:
+    """Manche HID-Wege liefern die Report-ID mit, manche nicht."""
+    if len(paket) >= 4 and paket[0] == HID_ZURUECK and paket[1] == HID_FAMILIE:
+        return paket
+    if len(paket) >= 4 and paket[0] == HID_FAMILIE:
+        return bytes([HID_ZURUECK]) + paket
+    return None
+
+
+def hid_adresse_lesen(paket: bytes) -> int | None:
+    """Antwort auf das Anmelden: die Adresse des Geräts."""
+    p = _hid_anfang(paket)
+    if p is None or len(p) < 10 or p[3] != HID_ADRESSE or p[8:10] != b"\xee\xff" or p[4] != 1:
+        return None
+    return p[2]
+
+
+def hid_lesen(paket: bytes, adresse: int | None = None) -> HidWerte | None:
+    p = _hid_anfang(paket)
+    if p is None or len(p) < HID_LAENGE or p[3] != HID_MESSWERTE:
+        return None
+    if adresse is not None and p[2] != adresse:
+        return None
+    w = [int.from_bytes(p[i:i + 4], "little") / 1000 for i in range(8, 48, 4)]
+    zeichen = p[0x3C]
+    if zeichen & 0x80:
+        w[1] = -w[1]
+    for bit, i in ((0x40, 6), (0x20, 7), (0x10, 8)):
+        if zeichen & bit:
+            w[i] = -w[i]
+    return HidWerte(*w, an=p[0x34] != 0, firmware=f"{p[0x36] // 10}.{p[0x36] % 10}")
+
+
+def hid_bauen(w: HidWerte, adresse: int = HID_ADRESSE_ANFANG) -> bytes:
+    """Gegenstück zu hid_lesen - für den Simulator und die Tests."""
+    p = bytearray(HID_LAENGE)
+    p[0:4] = bytes([HID_ZURUECK, HID_FAMILIE, adresse, HID_MESSWERTE])
+    werte = [w.spannung, w.strom, w.leistung, w.widerstand, w.energie_wh, w.kapazitaet_mah,
+             w.temp_fuehler, w.temp_cpu, w.temp_mos, w.luefter]
+    zeichen = 0
+    for n, (i, wert) in enumerate(zip(range(8, 48, 4), werte)):
+        if wert < 0:
+            zeichen |= {1: 0x80, 6: 0x40, 7: 0x20, 8: 0x10}.get(n, 0)
+        p[i:i + 4] = round(abs(wert) * 1000).to_bytes(4, "little")
+    p[0x34] = 1 if w.an else 0
+    haupt, neben = w.firmware.split(".")
+    p[0x36] = int(haupt) * 10 + int(neben)
+    p[0x3C] = zeichen
+    return bytes(p)
+
+
+def hid_adresse_bauen(adresse: int) -> bytes:
+    return hid_paket(bytes([HID_ZURUECK, HID_FAMILIE, adresse, HID_ADRESSE, 1, 0, 0, 0, 0xEE, 0xFF]))

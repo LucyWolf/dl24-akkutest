@@ -22,6 +22,8 @@ log = logging.getLogger("akkutest.geraet")
 # Abfrage-Takt in Sekunden. Die Tests stellen ihn für den Zeitraffer kürzer,
 # bevor das Fenster verbindet - sonst gilt bis zur ersten Abfrage noch 1 s.
 INTERVALL = 1.0
+# Über USB-HID fragt die App selbst - so oft, wie das Gerät neue Werte hat
+HID_INTERVALL = 0.5
 
 
 @dataclass
@@ -94,7 +96,10 @@ class Geraet:
         self.bei_roh = bei_roh
         self.bei_messwert: Callable[[Messwert], None] | None = None
         self.bei_fehler: Callable[[str], None] | None = None
-        self.protokoll: str | None = None          # "px100" oder "atorch"
+        self.protokoll: str | None = None          # "px100", "atorch", "hid" oder "unbekannt"
+        self.firmware: str | None = None
+        self._letzte_hid = 0.0
+        self._hid_adresse = p.HID_ADRESSE_ANFANG
         self._entwirrer = Entwirrer()
         self._antworten: queue.Queue = queue.Queue()
         self._atorch_gesehen = 0
@@ -111,6 +116,12 @@ class Geraet:
     def kann_steuern(self) -> bool:
         return self.protokoll == "px100"
 
+    @property
+    def spannung_stellen(self) -> int:
+        """Nachkommastellen, die das Gerät wirklich liefert: der Atorch-Bericht
+        über Bluetooth nur 0,1 V, PX100 und USB-HID 1 mV."""
+        return 1 if self.protokoll == "atorch" else 3
+
     # ---- hinein ----
     def _daten(self, daten: bytes) -> None:
         self._empfangen_bytes += len(daten)
@@ -121,6 +132,9 @@ class Geraet:
             log.info("< %s", p.hex_text(daten))
         if self.bei_roh:
             self.bei_roh("<", daten)
+        if self.v.pakete:
+            self._hid_paket(daten)
+            return
         for art, inhalt in self._entwirrer.hinein(daten):
             if art == "atorch":
                 self._atorch_gesehen += 1
@@ -130,6 +144,24 @@ class Geraet:
                                                w.kapazitaet_mah, w.energie_wh, w.temperatur))
             else:
                 self._antworten.put((art, inhalt))
+
+    def _hid_paket(self, daten: bytes) -> None:
+        adresse = p.hid_adresse_lesen(daten)
+        if adresse is not None:
+            self._antworten.put(("hid_adresse", adresse))
+            return
+        w = p.hid_lesen(daten, self._hid_adresse)
+        if w is None:
+            return
+        self._letzte_hid = time.monotonic()
+        self.firmware = w.firmware
+        if self.protokoll == "hid":
+            if self.bei_messwert:
+                strom = abs(w.strom)          # das Gerät meldet Entladen negativ
+                self.bei_messwert(Messwert(self.v.uhr(), w.spannung, strom, strom > 0.0005,
+                                           w.kapazitaet_mah, w.energie_wh, w.temp_mos))
+        else:
+            self._antworten.put(("hid", w))
 
     def _fehler(self, text: str) -> None:
         self._laeuft = False
@@ -143,11 +175,12 @@ class Geraet:
             self.bei_roh(">", daten)
         self.v.schreiben(daten)
 
-    def _frage(self, befehl: int, d1: int = 0, d2: int = 0, art: str = "px") -> object | None:
+    def _frage(self, befehl: int, d1: int = 0, d2: int = 0, art: str = "px",
+               paket: bytes | None = None) -> object | None:
         with self._sperre:
             while not self._antworten.empty():
                 self._antworten.get_nowait()
-            self._senden(p.px_befehl(befehl, d1, d2))
+            self._senden(paket if paket is not None else p.px_befehl(befehl, d1, d2))
             ende = time.monotonic() + self.antwortzeit
             while (rest := ende - time.monotonic()) > 0:
                 try:
@@ -161,6 +194,8 @@ class Geraet:
     # ---- Erkennen ----
     def erkennen(self, warten: float = 1.5) -> str:
         """Welche Sprache spricht das Gerät? Erst kurz zuhören, dann fragen."""
+        if self.v.pakete:
+            return self._hid_erkennen()
         time.sleep(warten)
         for _ in range(3):
             if self._frage(p.PX_SPANNUNG) is not None:
@@ -188,11 +223,37 @@ class Geraet:
             "• Ist die Atorch-App am Handy noch verbunden? Bluetooth geht nur mit einem Gerät.\n\n"
             "Im Reiter „Diagnose“ steht, was über die Leitung kam.")
 
+    def _hid_erkennen(self) -> str:
+        """USB-HID: anmelden (das Gerät nennt seine Adresse), dann einmal abfragen."""
+        for _ in range(3):
+            a = self._frage(0, art="hid_adresse", paket=p.hid_anmelden())
+            if a is not None:
+                self._hid_adresse = int(a)
+                log.info("USB-HID: Gerät meldet Adresse %d", a)
+                break
+        for _ in range(3):
+            w = self._frage(0, art="hid", paket=p.hid_abfrage(self._hid_adresse))
+            if w is not None:
+                self.protokoll = "hid"
+                log.info("USB-HID: Messwerte kommen (Firmware %s)", self.firmware)
+                return self.protokoll
+        if self._empfangen_bytes:
+            self.protokoll = "unbekannt"
+            log.warning("USB-HID: %d Bytes in unbekanntem Format - bleibe verbunden", self._empfangen_bytes)
+            return self.protokoll
+        raise VerbindungsFehler(
+            "Der DL24 antwortet über USB nicht.\n\n"
+            "• Ist die Atorch-PC-Software noch offen? Erst schließen.\n"
+            "• USB-Kabel einmal ab- und wieder anstecken.\n\n"
+            "Im Reiter „Diagnose“ steht, was über die Leitung kam.")
+
     # ---- Messen ----
     def starten(self) -> None:
         self._laeuft = True
         if self.protokoll == "px100":
             threading.Thread(target=self._abfragen, name="abfrage", daemon=True).start()
+        elif self.protokoll == "hid":
+            threading.Thread(target=self._hid_abfragen, name="hid-abfrage", daemon=True).start()
 
     def anhalten(self) -> None:
         self._laeuft = False
@@ -212,6 +273,23 @@ class Geraet:
                 if self.bei_messwert:
                     self.bei_messwert(m)
             time.sleep(max(0.0, self.intervall - (time.monotonic() - beginn)))
+
+    def _hid_abfragen(self) -> None:
+        # Nicht auf jede Antwort warten: fragen, und was kommt, geht über
+        # _hid_paket direkt an die Anzeige. Bleibt es zu lange still, ist das
+        # Gerät weg.
+        takt = min(self.intervall, HID_INTERVALL)
+        self._letzte_hid = time.monotonic()
+        while self._laeuft:
+            try:
+                self._senden(p.hid_abfrage(self._hid_adresse))
+            except Exception as e:
+                self._fehler(f"USB: {e}")
+                return
+            time.sleep(takt)
+            if time.monotonic() - self._letzte_hid > max(5.0, takt * 10):
+                self._fehler("Der DL24 antwortet über USB nicht mehr.")
+                return
 
     def messen(self) -> Messwert | None:
         werte = {}
@@ -246,6 +324,8 @@ class Geraet:
         return self._setzen(p.PX_ABSCHALT_SETZEN, *p.px_zahl_mit_hundertsteln(volt))
 
     def zaehler_null(self) -> None:
+        if self.protokoll == "hid":
+            return            # den Befehl dafür kennen wir über USB noch nicht
         if self.kann_steuern:
             self._setzen(p.PX_ZAEHLER_NULL)
         else:
