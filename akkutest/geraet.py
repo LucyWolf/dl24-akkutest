@@ -224,28 +224,36 @@ class Geraet:
             "Im Reiter „Diagnose“ steht, was über die Leitung kam.")
 
     def _hid_erkennen(self) -> str:
-        """USB-HID: anmelden (das Gerät nennt seine Adresse), dann einmal abfragen."""
-        for _ in range(3):
-            a = self._frage(0, art="hid_adresse", paket=p.hid_anmelden())
-            if a is not None:
-                self._hid_adresse = int(a)
-                log.info("USB-HID: Gerät meldet Adresse %d", a)
+        """USB-HID: anmelden (das Gerät nennt seine Adresse), dann abfragen.
+        Antwortet es nicht, den nächsten Weg probieren (siehe UsbHid)."""
+        while True:
+            for _ in range(2):
+                a = self._frage(0, art="hid_adresse", paket=p.hid_anmelden())
+                if a is not None:
+                    self._hid_adresse = int(a)
+                    log.info("USB-HID: Gerät meldet Adresse %d", a)
+                    break
+            for _ in range(2):
+                w = self._frage(0, art="hid", paket=p.hid_abfrage(self._hid_adresse))
+                if w is not None:
+                    self.protokoll = "hid"
+                    log.info("USB-HID: Messwerte kommen (Firmware %s) über %s",
+                             self.firmware, getattr(self.v, "weg_text", "?"))
+                    return self.protokoll
+            if self._empfangen_bytes:
                 break
-        for _ in range(3):
-            w = self._frage(0, art="hid", paket=p.hid_abfrage(self._hid_adresse))
-            if w is not None:
-                self.protokoll = "hid"
-                log.info("USB-HID: Messwerte kommen (Firmware %s)", self.firmware)
-                return self.protokoll
+            weiter = getattr(self.v, "naechster_weg", None)
+            if not weiter or not weiter():
+                break
         if self._empfangen_bytes:
             self.protokoll = "unbekannt"
             log.warning("USB-HID: %d Bytes in unbekanntem Format - bleibe verbunden", self._empfangen_bytes)
             return self.protokoll
         raise VerbindungsFehler(
-            "Der DL24 antwortet über USB nicht.\n\n"
+            "Der DL24 antwortet über USB nicht – auf keinem Weg.\n\n"
             "• Ist die Atorch-PC-Software noch offen? Erst schließen.\n"
             "• USB-Kabel einmal ab- und wieder anstecken.\n\n"
-            "Im Reiter „Diagnose“ steht, was über die Leitung kam.")
+            "Was probiert wurde, steht in der Logdatei (Reiter „Diagnose“).")
 
     # ---- Messen ----
     def starten(self) -> None:

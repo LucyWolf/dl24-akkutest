@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.12 – 15.11.2026
+
+- USB: Der DL24/P hat in 1.0.11 unter Windows nicht geantwortet. Die
+  Atorch-Software spricht ihn über libusb an, die App über den Windows-Treiber,
+  und der will die Pakete je nach Gerät mit oder ohne vorangestellte 00. Die App
+  probiert jetzt beide Schreibweisen und alle HID-Schnittstellen des Geräts
+  durch und schreibt ins Log, welcher Weg geantwortet hat.
+- Absturz nach mehreren gescheiterten USB-Versuchen behoben: die Verbindung
+  wurde geschlossen, während noch gelesen wurde.
+
 ## 1.0.11 – 15.11.2026
 
 - **USB am DL24/P** (Farbdisplay): Das Gerät meldet sich am Kabel als

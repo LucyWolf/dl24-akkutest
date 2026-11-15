@@ -85,64 +85,134 @@ def hid_hinweis() -> str:
 
 
 class UsbHid(Verbindung):
+    """Der DL24/P am USB-Kabel.
+
+    Die Atorch-Software spricht ihn über libusb an und schickt die 64 Byte
+    roh, beginnend mit 55. Über den Windows-HID-Treiber kommt es darauf an,
+    ob das Gerät Report-IDs benutzt: ohne braucht es eine 00 davor, mit ist
+    die 55 selbst die ID. Und ein Gerät kann mehrere HID-Schnittstellen
+    haben. Deshalb gibt es mehrere "Wege" (Schnittstelle × Schreibweise);
+    geraet.py probiert sie durch, bis einer antwortet, und das Log sagt,
+    welcher es war.
+    """
     pakete = True
 
-    def __init__(self, pfad: str) -> None:
+    def __init__(self, pfad, alle_pfade=None) -> None:
         super().__init__()
-        self.pfad = pfad
+        pfade = list(alle_pfade or [pfad])
+        if pfad in pfade:
+            pfade.remove(pfad)
+        pfade.insert(0, pfad)
+        self.wege = [(pf, art) for pf in pfade for art in ("null", "roh")]
+        self.weg = 0
         self._d = None
+        self._faden: threading.Thread | None = None
         self._laeuft = False
-        self._schreib_sperre = threading.Lock()
+        self._sperre = threading.Lock()
+
+    @property
+    def weg_text(self) -> str:
+        pfad, art = self.wege[self.weg]
+        return f"Schnittstelle {self._pfad_kurz(pfad)}, " + ("mit 00 davor" if art == "null" else "roh wie libusb")
+
+    @staticmethod
+    def _pfad_kurz(pfad) -> str:
+        t = pfad.decode(errors="replace") if isinstance(pfad, bytes) else str(pfad)
+        return t if len(t) < 60 else "…" + t[-50:]
 
     def oeffnen(self) -> None:
         try:
-            import hid
+            import hid  # noqa: F401
         except ImportError as e:
             raise VerbindungsFehler("USB-HID fehlt in dieser Fassung (Paket „hidapi“).") from e
-        try:
-            d = hid.device()
-            d.open_path(self.pfad.encode() if isinstance(self.pfad, str) else self.pfad)
-        except Exception as e:
-            raise VerbindungsFehler(hid_hinweis() + f"\n\n({e})") from e
+        fehler = None
+        for i in range(0, len(self.wege), 2):          # je Schnittstelle einmal öffnen
+            self.weg = i
+            try:
+                self._aufmachen()
+                return
+            except Exception as e:
+                fehler = e
+                log.warning("USB-HID: %s lässt sich nicht öffnen: %s", self._pfad_kurz(self.wege[i][0]), e)
+        raise VerbindungsFehler(hid_hinweis() + f"\n\n({fehler})")
+
+    def _aufmachen(self) -> None:
+        import hid
+        pfad = self.wege[self.weg][0]
+        d = hid.device()
+        d.open_path(pfad.encode() if isinstance(pfad, str) else pfad)
         self._d = d
         try:
-            self.info.append(f"USB-HID: {d.get_manufacturer_string() or '?'} / {d.get_product_string() or '?'}")
+            zeile = f"USB-HID: {d.get_manufacturer_string() or '?'} / {d.get_product_string() or '?'}"
+            if zeile not in self.info:
+                self.info.append(zeile)
         except Exception:
             pass
         self._laeuft = True
-        threading.Thread(target=self._lesen, name="hid", daemon=True).start()
+        self._faden = threading.Thread(target=self._lesen, args=(d,), name="hid", daemon=True)
+        self._faden.start()
+        log.info("USB-HID: Weg %d/%d – %s", self.weg + 1, len(self.wege), self.weg_text)
 
-    def _lesen(self) -> None:
+    def _zumachen(self) -> None:
+        # Erst den Lesefaden auslaufen lassen, dann schließen: ein close() unter
+        # einem laufenden read() bringt hidapi unter Windows zum Absturz
+        self._laeuft = False
+        f, self._faden = self._faden, None
+        if f and f is not threading.current_thread():
+            f.join(2)
+        d, self._d = self._d, None
+        if d:
+            try:
+                d.close()
+            except Exception:
+                pass
+
+    def naechster_weg(self) -> bool:
+        """Auf den nächsten Weg wechseln. False, wenn alle probiert sind."""
+        while self.weg + 1 < len(self.wege):
+            neue_schnittstelle = self.wege[self.weg + 1][0] != self.wege[self.weg][0]
+            self.weg += 1
+            if not neue_schnittstelle:
+                log.info("USB-HID: Weg %d/%d – %s", self.weg + 1, len(self.wege), self.weg_text)
+                return True
+            self._zumachen()
+            try:
+                self._aufmachen()
+                return True
+            except Exception as e:
+                log.warning("USB-HID: %s lässt sich nicht öffnen: %s", self._pfad_kurz(self.wege[self.weg][0]), e)
+        return False
+
+    def _lesen(self, d) -> None:
         while self._laeuft:
             try:
-                daten = self._d.read(64, 200)
+                daten = d.read(64, 200)
             except Exception as e:
                 if self._laeuft:
                     self._laeuft = False
                     self._abgerissen(f"USB-Verbindung getrennt ({e})")
                 return
-            if daten:
+            if daten and self._laeuft:
                 self._empfangen(bytes(daten))
 
     def schreiben(self, daten: bytes) -> None:
-        if not self._d:
-            raise VerbindungsFehler("nicht verbunden")
-        with self._schreib_sperre:
+        with self._sperre:
+            if not self._d:
+                raise VerbindungsFehler("nicht verbunden")
+            art = self.wege[self.weg][1]
+            paket = (b"\x00" + bytes(daten)) if art == "null" else bytes(daten)
             try:
-                n = self._d.write(bytes(daten))
+                n = self._d.write(paket)
             except Exception as e:
-                raise VerbindungsFehler(f"USB: senden ging nicht ({e})") from e
-        if n is not None and n < 0:
-            raise VerbindungsFehler("USB: senden ging nicht")
+                n = -1
+                log.info("USB-HID: schreiben (%s) ging nicht: %s", self.weg_text, e)
+            if n is None or n < 0:
+                # Kein Abbruch: geraet.py merkt es an der fehlenden Antwort
+                # und probiert den nächsten Weg
+                log.info("USB-HID: schreiben (%s) -> %s", self.weg_text, n)
 
     def schliessen(self) -> None:
-        self._laeuft = False
-        if self._d:
-            try:
-                self._d.close()
-            except Exception:
-                pass
-            self._d = None
+        self._zumachen()
 
 
 def hid_anschluesse() -> list[Anschluss]:
@@ -150,18 +220,20 @@ def hid_anschluesse() -> list[Anschluss]:
         import hid
         from .protokoll import HID_PID, HID_VID
         geraete = hid.enumerate(HID_VID, HID_PID)
-    except Exception:
+    except Exception as e:
+        log.info("USB-HID: Suche ging nicht: %s", e)
         return []
-    aus, gesehen = [], set()
+    pfade = []
     for g in geraete:
-        pfad = g.get("path")
-        if not pfad or pfad in gesehen:
-            continue
-        gesehen.add(pfad)
-        pfad = pfad.decode(errors="replace") if isinstance(pfad, bytes) else str(pfad)
-        name = g.get("product_string") or "DL24"
-        aus.append(Anschluss("hid", pfad, f"USB: {name} (genau, 1 mV)"))
-    return aus
+        log.info("USB-HID gefunden: Schnittstelle %s, Usage %04X/%04X, %s, %r",
+                 g.get("interface_number"), g.get("usage_page") or 0, g.get("usage") or 0,
+                 g.get("product_string"), g.get("path"))
+        if g.get("path") and g["path"] not in pfade:
+            pfade.append(g["path"])
+    if not pfade:
+        return []
+    name = geraete[0].get("product_string") or "DL24"
+    return [Anschluss("hid", pfade[0], f"USB: {name} (genau, 1 mV)", pfade)]
 
 
 # --------------------------------------------------------------------------
@@ -420,7 +492,7 @@ class Bluetooth(Verbindung):
 
 def oeffnen(anschluss: Anschluss) -> Verbindung:
     if anschluss.art == "hid":
-        v: Verbindung = UsbHid(anschluss.adresse)
+        v: Verbindung = UsbHid(anschluss.adresse, anschluss.geraet)
     elif anschluss.art == "usb":
         v = Seriell(anschluss.adresse)
     elif anschluss.art == "ble":

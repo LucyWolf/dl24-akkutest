@@ -14,6 +14,8 @@ from akkutest.geraet import Geraet
 from akkutest.simulator import SimAkku, SimDL24
 
 PFAD = b"\\\\?\\hid#vid_0483&pid_5750#7&abc"
+TOT = b"\\\\?\\hid#vid_0483&pid_5750&mi_01#7&tot"     # zweite Schnittstelle, antwortet nie
+geschlossen = []
 gesendet = []
 
 
@@ -27,7 +29,8 @@ class FalschesGeraet:
         self.sim.senden = self.raus.put
 
     def open_path(self, pfad):
-        assert pfad == PFAD, pfad
+        assert pfad in (PFAD, TOT), pfad
+        self.pfad = pfad
 
     def get_manufacturer_string(self):
         return "ATORCH"
@@ -42,28 +45,39 @@ class FalschesGeraet:
             return []
 
     def write(self, daten):
-        assert len(daten) == 64 and daten[0] == 0x55, daten
+        # wie der Windows-Treiber bei einem Gerät mit Report-ID 55: eine 00
+        # davor wird abgelehnt
+        if len(daten) != 64 or daten[0] != 0x55:
+            return -1
+        if self.pfad == TOT:
+            return 64
         gesendet.append(bytes(daten))
         self.sim.empfangen(bytes(daten))
         return len(daten)
 
     def close(self):
-        pass
+        geschlossen.append(self.pfad)
 
 
 def test_suchen_oeffnen_messen():
     hid = types.ModuleType("hid")
     hid.device = FalschesGeraet
-    hid.enumerate = lambda vid, pid: ([{"path": PFAD, "product_string": "ATORCH_USB_TESTER"}] * 2
+    hid.enumerate = lambda vid, pid: ([{"path": TOT, "product_string": "ATORCH_USB_TESTER"},
+                                       {"path": PFAD, "product_string": "ATORCH_USB_TESTER"},
+                                       {"path": PFAD, "product_string": "ATORCH_USB_TESTER"}]
                                       if (vid, pid) == (0x0483, 0x5750) else [])
     sys.modules["hid"] = hid
 
     liste = verbindung.hid_anschluesse()
-    assert len(liste) == 1 and liste[0].art == "hid", liste      # doppelte Einträge zusammengefasst
+    assert len(liste) == 1 and liste[0].art == "hid", liste      # ein Gerät, ein Eintrag
+    assert liste[0].geraet == [TOT, PFAD], liste[0].geraet
     v = verbindung.oeffnen(liste[0])
     assert v.pakete and any("ATORCH" in z for z in v.info), v.info
     g = Geraet(v, intervall=0.05)
+    g.antwortzeit = 0.2
     assert g.erkennen() == "hid"
+    assert v.wege[v.weg] == (PFAD, "roh"), v.wege[v.weg]          # die tote Schnittstelle übersprungen
+    assert TOT in geschlossen
     assert g.spannung_stellen == 3 and not g.kann_steuern and g.firmware == "1.1"
     assert gesendet[0] == p.hid_anmelden()
     assert gesendet[1] == p.hid_abfrage(3), gesendet[1].hex(" ")      # Adresse vom Gerät übernommen
@@ -72,6 +86,7 @@ def test_suchen_oeffnen_messen():
     g.starten()
     time.sleep(0.6)
     g.trennen()
+    assert geschlossen[-1] == PFAD and v._faden is None              # Lesefaden vor dem Schließen beendet
     assert len(werte) >= 5, werte
     m = werte[-1]
     assert m.strom == 0.5 and m.an and 3.5 < m.spannung < 4.2, m      # Strom positiv, obwohl negativ gemeldet
