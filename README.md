@@ -17,6 +17,9 @@ echte Kapazität messen und sehen, wie viel sie gegenüber neu verloren haben.
 - **USB und Bluetooth**: DL24/P mit Farbdisplay über das USB-Kabel (Spannung
   auf 1 mV genau) oder per Bluetooth (BLE, nur 0,1 V); ältere Geräte mit
   CH340-Chip als serieller Anschluss
+- **Ladegeräte, Netzteile, USB-Hubs prüfen**: Angaben vom Typenschild
+  eintragen (oder Vorlage wählen) und prüfen, ob das Gerät sie hält – mit
+  Stufentest, Dauertest mit Temperatur und Abschalttest
 - **Simulator** zum Ausprobieren ohne Gerät
 - **Diagnose**-Reiter: zeigt roh, was über die Leitung geht
 
@@ -79,6 +82,37 @@ gleichzeitig verbunden sein – vorher die Handy-App trennen.
 **Vergleichbar** sind Tests nur bei gleichem Strom: Bei höherem Strom kommt
 weniger heraus. Herstellerangaben sind meist bei 0,2C gemessen, 0,5C liegt
 etwas darunter.
+
+## So prüfst du ein Ladegerät oder Netzteil
+
+Geht nur, wenn das Programm die Last stellen kann: DL24 **über das USB-Kabel**
+verbunden (oder ein PX100).
+
+1. Den Ausgang des Ladegeräts an den Eingang des DL24 anschließen. Bei USB über
+   einen USB-Adapter mit Klemmen.
+2. Für die Temperatur den **Fühler des DL24** mit Klebeband ans Gehäuse des
+   Ladegeräts kleben. Ohne Fühler fällt die Temperatur weg.
+3. Reiter **Ladegeräte & Netzteile**: eine Vorlage wählen oder Spannung, Strom
+   oder Leistung vom Typenschild eintragen. Die Toleranz ist 5 %, bei 5 V also
+   4,75–5,25 V.
+4. Tests wählen:
+
+| Test | Was passiert |
+|---|---|
+| Stufentest | Strom in Stufen von 10 % bis 100 % der Angabe. Zeigt, wie weit die Spannung unter Last sinkt. |
+| Dauertest | Ein fester Strom über längere Zeit, mit Temperatur. Zeigt, ob das Gerät warm wird und dann nachgibt. |
+| Abschalttest | Über die Angabe hinaus in 5-%-Schritten, bis das Gerät abschaltet oder die Spannung einbricht – höchstens bis zur eingestellten Grenze. |
+
+5. **Prüfen.** Am Ende steht da, ob das Gerät die Angabe **hält**, mit
+   Kennlinie, Abschaltgrenze und höchster Temperatur. Jede Prüfung wird
+   gespeichert.
+
+Abgebrochen wird sofort, wenn die Spannung zusammenbricht oder die
+Temperaturgrenze erreicht ist. Der DL24 schafft höchstens 150 W.
+
+**USB-C- und Schnellladegeräte** geben 9 V, 12 V oder 20 V nur heraus, wenn
+das angeschlossene Gerät danach fragt. Das kann der DL24 nicht. Dafür braucht es
+einen PD/QC-Trigger-Adapter, sonst wird nur 5 V geprüft.
 
 ## Zwei Arten DL24
 

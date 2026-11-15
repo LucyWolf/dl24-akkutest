@@ -44,6 +44,36 @@ class SimAkku:
         return max(ruhespannung(self.typ, self.rest_mah / self.mah) * self.zellen - strom * self.innen, 0.0)
 
 
+class SimNetzteil:
+    """Ein Netzteil statt eines Akkus: Spannung sinkt mit dem Strom, über der
+    Abschaltgrenze geht es aus, bis die Last weg ist. Wird mit der Zeit warm."""
+
+    def __init__(self, nenn_v=5.0, innen_mohm=120.0, abschalt_a=3.0, tol_a=None, raum_c=22.0, heiz_c_je_w=4.0):
+        self.nenn_v, self.innen = nenn_v, innen_mohm / 1000
+        self.abschalt_a = abschalt_a
+        self.knick_a = tol_a                 # ab hier sackt die Spannung stark ab
+        self.raum, self.heiz = raum_c, heiz_c_je_w
+        self.temperatur = raum_c
+        self.aus = False
+        self.rest_mah = 0.0                  # wie beim Akku - zählt hier nichts
+
+    def spannung(self, strom: float) -> float:
+        if strom > self.abschalt_a:
+            self.aus = True
+        if self.aus:
+            if strom <= 0:
+                self.aus = False             # Last weg: Netzteil fängt sich
+            return 0.0
+        u = self.nenn_v + 0.05 - strom * self.innen
+        if self.knick_a and strom > self.knick_a:
+            u -= (strom - self.knick_a) * 2.0
+        return max(u, 0.0)
+
+    def schritt(self, dt: float, strom: float) -> None:
+        ziel = self.raum + self.spannung(strom) * strom * self.heiz
+        self.temperatur += (ziel - self.temperatur) * min(1.0, dt / 300)
+
+
 class SimDL24:
     """Das Gerät: Last, Zähler, Abschaltung - und die beiden Protokolle."""
 
@@ -75,6 +105,8 @@ class SimDL24:
         with self._sperre:
             self.simzeit += dt
             i = self.strom()
+            if hasattr(self.akku, "schritt"):
+                self.akku.schritt(dt, i)
             if i > 0:
                 u = self.akku.spannung(i)
                 if u <= self.abschalt_v or u <= 0.05:
@@ -172,7 +204,8 @@ class SimDL24:
             u, i = self.spannung(), self.strom()
             antwort = p.hid_bauen(p.HidWerte(
                 spannung=u, strom=-i, leistung=u * i, widerstand=u / i if i else 9999.991,
-                energie_wh=self.wh, kapazitaet_mah=self.mah, temp_fuehler=-46.388,
+                energie_wh=self.wh, kapazitaet_mah=self.mah,
+                temp_fuehler=getattr(self.akku, "temperatur", None) or -46.388,
                 temp_cpu=28.0, temp_mos=25 + u * i * 0.4, luefter=0, an=self.an, firmware=""),
                 self.hid_adresse)
         else:

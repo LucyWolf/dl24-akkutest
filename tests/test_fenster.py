@@ -47,7 +47,7 @@ def foto(w, name):
 
 
 def verbinden(f, protokoll):
-    f.anschluss.setCurrentIndex(f.anschluss.findText("Simulator", flags=fenster.Qt.MatchStartsWith)
+    f.anschluss.setCurrentIndex(f.anschluss.findText("Simulator – ausprobieren", flags=fenster.Qt.MatchStartsWith)
                                 if protokoll == "px100" else f.anschluss.count() - 1)
     f.verbinden_umschalten()
     assert warten(lambda: f.geraet is not None), meldungen
@@ -120,7 +120,7 @@ def test_ganzer_ablauf():
     assert "Zelle A" in inhalt and "Zustand %" in inhalt
 
     # Diagnose zeigt die Bytes
-    f.reiter.setCurrentIndex(2)
+    f.reiter.setCurrentIndex(3)
     assert "> B1 B2 11" in f.diag.toPlainText()
     assert "< CA CB" in f.diag.toPlainText()
     foto(f, "5-diagnose")
@@ -189,6 +189,55 @@ def test_unbekanntes_format_bleibt_verbunden():
     app.processEvents()
     assert f.geraet is not None, "Verbindung muss bestehen bleiben"
     logging.getLogger().removeHandler(h)
+    f.trennen()
+    f.close()
+
+
+def test_netzteil_reiter():
+    geraet.HID_INTERVALL = 0.02
+    SimulatorVerbindung.voreinstellung = {"tempo": 50}
+    sp = Speicher()
+    f = fenster.Fenster(sp)
+    f.resize(1280, 900)
+    f.show()
+    f.reiter.setCurrentIndex(2)
+    assert f.reiter.tabText(2).startswith("Ladegeräte")
+    assert not f.nt.knopf_start.isEnabled()                 # nicht verbunden
+    f.anschluss.setCurrentIndex(f.anschluss.findText("Simulator – USB-Ladegerät", flags=fenster.Qt.MatchStartsWith))
+    f.verbinden_umschalten()
+    assert warten(lambda: f.geraet is not None), meldungen
+    assert warten(lambda: f.letzter is not None)
+    assert f.nt.knopf_start.isEnabled()
+    f.nt.vorlage.setCurrentIndex(f.nt.vorlage.findText("USB-Ladegerät 5 V / 2 A"))
+    f.nt._vorlage()
+    assert f.nt.nenn_v.value() == 5.0 and f.nt.nenn_a.value() == 2.0
+    f.nt.name.setText("Test-Lader")
+    f.nt.stufen.setValue(4)
+    f.nt.mit_dauer.setChecked(False)
+    f.nt.mit_abschalt.setChecked(True)
+    f.nt.max_proz.setValue(150)
+    assert "4,75" in f.nt.angabe_hinweis.text()
+    f.nt.starten()
+    assert f.nt.laeuft and not f.knopf_start.isEnabled()      # kein Akkutest nebenher
+    assert warten(lambda: f.nt.schritt.text().startswith("Stufentest"), 10), f.nt.schritt.text()
+    foto(f, "7-netzteil-laeuft")
+    assert warten(lambda: not f.nt.laeuft and f.nt.ergebnis.isVisible(), 60), f.nt.ablauf.zustand
+    r = f.nt.ablauf.ergebnis
+    print("Netzteil:", r.grund, r.abschalt_a)
+    assert r.haelt is True and r.abschalt_a and 2.6 < r.abschalt_a <= 2.75
+    text = f.nt.ergebnis.text()
+    assert "Hält die Angabe" in text and "schaltet ab bei 2,70 A" in text and "Kennlinie" in text, text
+    assert "Temperatur" in text and "°C" in text
+    assert not f.geraet.v.geraet.an
+    foto(f, "8-netzteil-ergebnis")
+    # gespeichert und in der Liste
+    alle = sp.netzteil_tests()
+    assert len(alle) == 1 and alle[0]["name"] == "Test-Lader" and alle[0]["haelt"] == 1
+    assert f.nt.tabelle.rowCount() == 1 and "hält" in f.nt.tabelle.item(0, 3).text()
+    f.nt.ergebnis.setText("")
+    f.nt.tabelle.selectRow(0)
+    app.processEvents()
+    assert "Hält die Angabe" in f.nt.ergebnis.text()
     f.trennen()
     f.close()
 

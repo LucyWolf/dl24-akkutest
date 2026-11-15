@@ -36,6 +36,7 @@ class Messwert:
     mah_geraet: float | None = None
     wh_geraet: float | None = None
     temperatur: float | None = None
+    temp_fuehler: float | None = None   # Fühler am Kabel (USB); None = keiner angesteckt
 
     @property
     def leistung(self) -> float:
@@ -160,7 +161,8 @@ class Geraet:
             self._strom_pruefen(w.an, strom)
             if self.bei_messwert:
                 self.bei_messwert(Messwert(self.v.uhr(), w.spannung, strom, w.an,
-                                           w.kapazitaet_mah, w.energie_wh, w.temp_mos))
+                                           w.kapazitaet_mah, w.energie_wh, w.temp_mos,
+                                           w.temp_fuehler if w.temp_fuehler > -40 else None))
         else:
             self._antworten.put(("hid", w))
 

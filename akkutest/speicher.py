@@ -56,6 +56,19 @@ CREATE TABLE IF NOT EXISTS tests (
     grund TEXT NOT NULL DEFAULT '',
     kurve TEXT NOT NULL DEFAULT '[]'
 );
+CREATE TABLE IF NOT EXISTS netzteil_tests (
+    id INTEGER PRIMARY KEY,
+    wann REAL NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    nenn_v REAL NOT NULL,
+    nenn_a REAL NOT NULL,
+    nenn_w REAL NOT NULL DEFAULT 0,
+    einstellung TEXT NOT NULL DEFAULT '{}',
+    ergebnis TEXT NOT NULL DEFAULT '{}',
+    haelt INTEGER,
+    grund TEXT NOT NULL DEFAULT '',
+    kurve TEXT NOT NULL DEFAULT '[]'
+);
 """
 
 
@@ -137,6 +150,31 @@ class Speicher:
         r = self.db.execute("SELECT * FROM tests WHERE akku_id=? AND vollstaendig=1 ORDER BY wann DESC LIMIT 1",
                             (akku_id,)).fetchone()
         return dict(r) if r else None
+
+    # ---- Netzteile / Ladegeräte ----
+    def netzteil_speichern(self, einstellung, ergebnis, punkte, wann: float) -> int:
+        e, r = einstellung, ergebnis
+        c = self.db.execute(
+            "INSERT INTO netzteil_tests (wann, name, nenn_v, nenn_a, nenn_w, einstellung, ergebnis, haelt, "
+            "grund, kurve) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (wann, e.name, e.nenn_v, e.nenn_a, e.nenn_w, json.dumps(e.__dict__), json.dumps(r.als_dict()),
+             None if r.haelt is None else int(r.haelt), r.grund, json.dumps(_ausduennen(punkte))))
+        self.db.commit()
+        return c.lastrowid
+
+    def netzteil_tests(self) -> list[dict]:
+        aus = []
+        for r in self.db.execute("SELECT * FROM netzteil_tests ORDER BY wann DESC"):
+            d = dict(r)
+            d["einstellung"] = json.loads(d["einstellung"])
+            d["ergebnis"] = json.loads(d["ergebnis"])
+            d["kurve"] = json.loads(d["kurve"])
+            aus.append(d)
+        return aus
+
+    def netzteil_loeschen(self, test_id: int) -> None:
+        self.db.execute("DELETE FROM netzteil_tests WHERE id=?", (test_id,))
+        self.db.commit()
 
     def csv_schreiben(self, pfad: Path) -> int:
         zeilen = self.db.execute(

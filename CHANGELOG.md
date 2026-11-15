@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.15 – 15.11.2026
+
+- **Neu: Ladegeräte, Netzteile und USB-Hubs prüfen** (eigener Reiter). Angaben
+  vom Typenschild eintragen oder eine Vorlage wählen, dann wahlweise
+  Stufentest, Dauertest und Abschalttest. Ergebnis: hält es die Angabe, wie weit
+  sinkt die Spannung, wo schaltet es ab, wie warm wird es (Fühler des DL24).
+  Sicher: Abbruch bei Spannungseinbruch und Temperaturgrenze, eigene
+  Obergrenze für den Strom, höchstens 150 W. Alle Prüfungen werden gespeichert.
+- Der Temperaturfühler des DL24 wird über USB jetzt mitgelesen.
+- Simulator: zusätzlich ein USB-Ladegerät 5 V / 2 A zum Ausprobieren.
+
 ## 1.0.14 – 15.11.2026
 
 - Die Statuszeile zeigte über USB „Firmware 0.0“. Das Feld im Messpaket ist bei

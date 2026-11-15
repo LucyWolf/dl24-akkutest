@@ -501,8 +501,13 @@ def oeffnen(anschluss: Anschluss) -> Verbindung:
     elif anschluss.art == "ble":
         v = Bluetooth(anschluss.adresse, anschluss.geraet)
     elif anschluss.art == "sim":
-        from .simulator import SimulatorVerbindung
-        v = SimulatorVerbindung(protokoll=anschluss.adresse.split(":")[1] if ":" in anschluss.adresse else "px100")
+        from .simulator import SimNetzteil, SimulatorVerbindung
+        art = anschluss.adresse.split(":")[1] if ":" in anschluss.adresse else "px100"
+        if art == "netzteil":
+            # USB-Ladegerät 5 V / 2 A, das bei 2,6 A abschaltet - über USB-HID wie der echte DL24
+            v = SimulatorVerbindung(protokoll="hid", akku=SimNetzteil(5.0, innen_mohm=120, abschalt_a=2.6))
+        else:
+            v = SimulatorVerbindung(protokoll=art)
     else:
         raise VerbindungsFehler(f"unbekannte Art {anschluss.art}")
     v.oeffnen()
