@@ -194,6 +194,7 @@ class NetzteilErgebnis:
     verspricht: bool | None = None         # liefert den angegebenen Strom ohne abzuschalten?
     max_w_tol: float | None = None         # höchste Leistung mit Spannung in der Toleranz
     max_w: float | None = None             # höchste Leistung überhaupt (vor dem Abschalten)
+    laien: list[str] = field(default_factory=list)   # dasselbe in einfachen Sätzen, für den Bericht
 
     def als_dict(self) -> dict:
         d = dict(self.__dict__)
@@ -299,6 +300,51 @@ def bewerten(e: NetzteilEinstellung, r: NetzteilErgebnis) -> None:
         gruende.append(f"Hoher Widerstand ({_k(r.widerstand_mohm, 0)} mΩ) – oft ist es das Kabel. Kabelwert "
                        "eintragen, dann wird es herausgerechnet")
     r.gruende = gruende
+    r.laien = laien_saetze(e, r, tiefst if not e.unbekannt else None)
+
+
+def laien_saetze(e: NetzteilEinstellung, r: NetzteilErgebnis, tiefst: float | None) -> list[str]:
+    """Für Leute ohne Fachwissen: was heißt das Ergebnis im Alltag?"""
+    art = "der USB-Anschluss" if e.usb and e.nenn_w <= 5 and e.strom_a <= 0.9 else (
+        "das Gerät")
+    versprochen_w = e.nenn_v * e.strom_a
+    s: list[str] = []
+    if e.unbekannt:
+        if r.max_w_tol:
+            s.append(f"Auf dem Gerät steht nicht, wie viel es kann. Gemessen: Es liefert bis "
+                     f"{_k(r.max_w_tol, 1)} Watt, ohne dass die Spannung zu stark absinkt.")
+        else:
+            s.append("Auf dem Gerät steht nicht, wie viel es kann. Schon bei kleiner Last sinkt die Spannung "
+                     "zu stark ab.")
+    elif r.verspricht is True:
+        s.append(f"Versprochen sind {_k(e.strom_a)} Ampere ({_k(versprochen_w, 1)} Watt). Diese Leistung "
+                 f"liefert {art}, ohne abzuschalten.")
+    elif r.verspricht is False and r.abschalt_a is not None:
+        s.append(f"Versprochen sind {_k(e.strom_a)} Ampere ({_k(versprochen_w, 1)} Watt). {art.capitalize()} "
+                 f"schaltet aber schon bei {_k(r.abschalt_a)} Ampere ab – es schafft also nicht, was draufsteht.")
+    if not e.unbekannt and tiefst is not None:
+        if tiefst < e.mindest_v:
+            s.append(f"Unter Last sinkt die Spannung auf {_k(tiefst)} Volt. Mindestens {_k(e.mindest_v)} Volt "
+                     "müssen es sein. Angeschlossene Geräte können sich deshalb abschalten, abstürzen oder "
+                     "laden nicht richtig.")
+        elif tiefst < e.untere_v:
+            s.append(f"Unter Last sinkt die Spannung auf {_k(tiefst)} Volt – weniger als die üblichen "
+                     f"{_k(e.untere_v)} Volt. Zum Laden von Handys reicht das meist; empfindliche Geräte "
+                     "(z. B. Raspberry Pi, externe Festplatten) können damit Probleme machen.")
+        else:
+            s.append(f"Die Spannung bleibt dabei im erlaubten Bereich (mindestens {_k(tiefst)} Volt). "
+                     "Angeschlossene Geräte werden zuverlässig versorgt.")
+    if r.leerlauf_v is not None and r.leerlauf_v > e.hoechst_v:
+        s.append(f"Ohne angeschlossenes Gerät liefert es {_k(r.leerlauf_v)} Volt – zu viel. Das kann "
+                 "angeschlossene Geräte beschädigen.")
+    if r.zu_heiss:
+        s.append(f"Es wird zu heiß (über {_k(e.temp_grenze, None)} °C). Die Prüfung wurde deshalb abgebrochen.")
+    if r.abschalt_a is not None and r.verspricht is not False:
+        s.append(f"Bei Überlast ({_k(r.abschalt_a)} Ampere) schaltet es sich ab – das ist gut, so schützt es "
+                 "sich selbst.")
+    if not e.kabel_mohm and not e.unbekannt and tiefst is not None and tiefst < e.untere_v:
+        s.append("Gemessen wurde am Ende des USB-Kabels. Ein Teil des Spannungsverlusts kann am Kabel liegen.")
+    return s
 
 
 @dataclass

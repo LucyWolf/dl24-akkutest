@@ -94,9 +94,11 @@ verbunden (oder ein PX100).
    einen USB-Adapter mit Klemmen.
 2. Für die Temperatur den **Fühler des DL24** mit Klebeband ans Gehäuse des
    Ladegeräts kleben. Ohne Fühler fällt die Temperatur weg.
-3. Reiter **Ladegeräte & Netzteile**: eine Vorlage wählen oder Spannung, Strom
-   oder Leistung vom Typenschild eintragen. Die Toleranz ist 5 %, bei 5 V also
-   4,75–5,25 V.
+3. Reiter **Ladegeräte & Netzteile**: eine Vorlage wählen oder Spannung und
+   Strom **oder** Watt vom Typenschild eintragen – das andere rechnet das
+   Programm aus. Steht nichts drauf: „Strom/Leistung steht nicht drauf“
+   ankreuzen. Erst dann lassen sich die Tests einstellen. Die Toleranz ist 5 %,
+   bei 5 V also 4,75–5,25 V.
 4. Tests wählen:
 
 | Test | Was passiert |
@@ -118,9 +120,16 @@ verbunden (oder ein PX100).
 Getrennt davon steht da, ob es **schafft, was es verspricht**, also den
 angegebenen Strom ohne Abschalten liefert.
 
-**Größte Leistung finden:** Beim Abschalttest „bis zum Ende“ ankreuzen. Dann
-wird gesteigert, bis das Gerät abschaltet oder einbricht – höchstens 5 A bei
-USB und 150 W.
+**Größte Leistung finden:** Beim Abschalttest „bis zur Abschaltung“ ankreuzen.
+Dann wird gesteigert, bis das Gerät abschaltet oder einbricht – höchstens 5 A
+bei USB und 150 W. **Vorsicht:** Dabei wird das Gerät absichtlich überlastet.
+Gute Netzteile schalten einfach ab, billige ohne Schutzschaltung können
+kaputtgehen oder sehr heiß werden. Nur unter Aufsicht, nichts Brennbares in der
+Nähe – das Programm fragt vorher nach.
+
+**Der Bericht (PDF)** ist für Leute ohne Fachwissen geschrieben: oben „Kurz
+gesagt“ mit dem Urteil in einfachen Sätzen, dann was geprüft wurde und das
+Diagramm, die Messwerte für Fachleute am Ende.
 
 **Das Kabel zählt mit.** Gemessen wird am DL24, also hinter Kabel und Adapter.
 Ein dünnes USB-Kabel verliert bei 2 A leicht 0,5 V. Damit das nicht dem

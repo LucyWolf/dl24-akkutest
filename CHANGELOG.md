@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.21 – 15.11.2026
+
+- **Bericht für alle verständlich:** oben „Kurz gesagt“ mit dem Urteil in
+  einfachen Sätzen (was heißt das für angeschlossene Geräte?), dann was geprüft
+  wurde und das Diagramm – hell, damit es sich drucken lässt. Die Messwerte für
+  Fachleute stehen am Ende.
+- Auch auf dem Bildschirm steht das Urteil jetzt in einfachen Sätzen.
+- **Erst das Typenschild, dann die Tests:** Die Felder starten leer, die Tests
+  lassen sich erst einstellen, wenn Spannung und Strom/Watt eingetragen sind
+  oder „steht nicht drauf – ermitteln“ angekreuzt ist.
+- **„bis zur Abschaltung“** beim Abschalttest nur mit Warnung und Rückfrage:
+  Das Gerät wird absichtlich überlastet.
+- Der Gerätename aus einer Vorlage stand doppelt im Bericht.
+
 ## 1.0.20 – 15.11.2026
 
 - **Vollständiges Diagramm** bei der Netzteilprüfung: oben die Spannung, darunter

@@ -30,8 +30,9 @@ URTEILE = {"gut": ("✔ Empfehlenswert", "#2e9e4f"),
            "nicht": ("✘ Nicht verwenden", "#d03b3b")}
 
 
-def urteil_html(r: dict) -> list[str]:
-    """Die klare Aussage oben im Ergebnis. Alte Prüfungen haben noch keins."""
+def urteil_html(r: dict, fach: bool = False) -> list[str]:
+    """Die klare Aussage oben im Ergebnis. Alte Prüfungen haben noch keins.
+    Auf dem Bildschirm in einfachen Sätzen, für Fachleute mit den Gründen."""
     aus = []
     u = r.get("urteil")
     if u in URTEILE:
@@ -42,15 +43,58 @@ def urteil_html(r: dict) -> list[str]:
         aus.append("<b style='color:#2e9e4f'>✔ Schafft, was es verspricht</b>")
     elif v is False:
         aus.append("<b style='color:#d03b3b'>✘ Schafft nicht, was es verspricht</b>")
-    for g in r.get("gruende") or []:
+    saetze = r.get("gruende") if fach or not r.get("laien") else r.get("laien")
+    for g in saetze or []:
         aus.append(f"• {html.escape(g)}")
     return aus
 
 
-def ergebnis_html(e: dict, r: dict) -> str:
+def kurz_html(e: dict, r: dict) -> str:
+    """„Kurz gesagt“ für den Bericht: Urteil groß, dann einfache Sätze."""
+    zeilen = []
+    u = r.get("urteil")
+    if u in URTEILE:
+        wort, farbe = URTEILE[u]
+        zeilen.append(f"<p style='font-size:20px; color:{farbe}'><b>{wort}</b></p>")
+    if "teile" in r:
+        teile, nicht = r.get("teile") or [], r.get("nicht") or []
+        hoch = [t for t in teile if t["einstellung"]["nenn_v"] > 5.5]
+        if not hoch and any(n["volt"] > 5.5 for n in nicht):
+            zeilen.append("<p>Das Ladegerät kann <b>kein Schnellladen</b>: Es kamen immer nur 5 Volt.</p>")
+        elif teile:
+            zeilen.append("<p>Das Ladegerät kann diese Spannungen liefern: <b>"
+                          + ", ".join(f"{_kurz(t['einstellung']['nenn_v'])} V" for t in teile) + "</b>"
+                          + (". Nicht dabei: " + ", ".join(f"{_kurz(n['volt'])} V" for n in nicht) if nicht else "")
+                          + ".</p>")
+        for t in teile:
+            te, tr = t["einstellung"], t["ergebnis"]
+            wort = URTEILE.get(tr.get("urteil"), ("", ""))[0]
+            text = " ".join(tr.get("laien") or [])
+            zeilen.append(f"<p><b>Bei {_kurz(te['nenn_v'])} Volt:</b> {html.escape(wort)}. {html.escape(text)}</p>")
+    else:
+        for satz in r.get("laien") or []:
+            zeilen.append(f"<p>{html.escape(satz)}</p>")
+    return "".join(zeilen)
+
+
+def geprueft_text(e: dict, r: dict) -> str:
+    """Was wurde gemacht - in einem Satz, ohne Fachwörter."""
+    stufen = [s for t in (r.get("teile") or [{"ergebnis": r}]) for s in t["ergebnis"].get("stufen") or []]
+    if not stufen:
+        return ""
+    lo, hi = min(s["soll_a"] for s in stufen), max(s["soll_a"] for s in stufen)
+    text = (f"Das Gerät wurde mit einer elektronischen Last (Atorch DL24) Schritt für Schritt stärker belastet – "
+            f"von {zahl(lo)} bis {zahl(hi)} Ampere – und dabei wurde gemessen, wie viel Spannung noch ankommt. "
+            "Ein gutes Netzteil hält die Spannung auch unter Last fast gleich.")
+    if e.get("kabel_mohm"):
+        text += f" Der Verlust im Kabel ({e['kabel_mohm']:.0f} mΩ) ist herausgerechnet."
+    return text
+
+
+def ergebnis_html(e: dict, r: dict, fach: bool = False) -> str:
     """Aus gespeicherten Werten (dict), damit es auch für alte Tests geht."""
     if "teile" in r:
-        return trigger_html(e, r)
+        return trigger_html(e, r, fach)
     strom = e["nenn_a"] if e["nenn_a"] > 0 else (e["nenn_w"] / e["nenn_v"] if e["nenn_v"] else 0)
     angabe = f"{_kurz(e['nenn_v'])} V / {_kurz(round(strom, 2))} A"
     w = e["nenn_w"] or e["nenn_v"] * strom
@@ -70,7 +114,7 @@ def ergebnis_html(e: dict, r: dict) -> str:
             zeilen.append("<b style='color:#d03b3b; font-size:14px'>Schon bei der ersten Stufe "
                           "außerhalb der Toleranz</b>")
     if "urteil" in r:
-        zeilen += urteil_html(r)
+        zeilen += urteil_html(r, fach)
     elif unbekannt:
         pass
     elif r.get("haelt") is True:
@@ -154,11 +198,11 @@ def ergebnis_html(e: dict, r: dict) -> str:
     return "<br>".join(zeilen)
 
 
-def trigger_html(e: dict, r: dict) -> str:
+def trigger_html(e: dict, r: dict, fach: bool = False) -> str:
     zeilen = [f"<b style='font-size:15px'>{html.escape(e['name'] or 'Ladegerät')}</b> – Schnellladen über "
               "Trigger-Adapter"]
     if "urteil" in r:
-        zeilen += urteil_html(r)
+        zeilen += urteil_html(r, fach)
     elif r.get("haelt") is True:
         zeilen.append("<b style='color:#2e9e4f; font-size:14px'>✔ Hält alle Angaben</b>")
     elif r.get("haelt") is False:
@@ -196,7 +240,7 @@ def trigger_html(e: dict, r: dict) -> str:
     zeilen.append(f"<span style='color:gray'>Dauer {dauer_text(r.get('dauer_s', 0))} · "
                   f"{html.escape(r.get('grund', ''))}</span>")
     for t in teile:
-        zeilen.append("<hr>" + ergebnis_html(t["einstellung"], t["ergebnis"]))
+        zeilen.append("<hr>" + ergebnis_html(t["einstellung"], t["ergebnis"], fach))
     return "<br>".join(zeilen)
 
 
@@ -221,9 +265,9 @@ class NetzteilReiter(QWidget):
         g = QGroupBox("Typenschild")
         f = QFormLayout(g)
         self.vorlage = QComboBox()
-        self.vorlage.addItem("– eigene Angabe –", None)
+        self.vorlage.addItem("– wählen oder unten selbst eintragen –", None)
         for name, v, a in nt.VORLAGEN:
-            self.vorlage.addItem(nt.vorlage_text(name, v, a), (v, a))
+            self.vorlage.addItem(nt.vorlage_text(name, v, a), (v, a, name))
         self.vorlage.activated.connect(self._vorlage)
         f.addRow("Vorlage:", self.vorlage)
         self.name = QLineEdit()
@@ -235,6 +279,11 @@ class NetzteilReiter(QWidget):
         f.addRow("Ausgangsstrom:", self.nenn_a)
         self.nenn_w = self._zahlfeld(0, 200, 1, 1, " W", "nicht angegeben")
         f.addRow("Leistung:", self.nenn_w)
+        self.unbekannt = QCheckBox("Strom/Leistung steht nicht drauf – ermitteln")
+        self.unbekannt.setToolTip("Dann steigert die App den Strom, bis das Gerät abschaltet, und sagt, "
+                                  "wie viel es wirklich liefert")
+        self.unbekannt.toggled.connect(self._unbekannt_umschalten)
+        f.addRow(self.unbekannt)
         self.toleranz = self._zahlfeld(1, 20, 1, 1, " %")
         self.toleranz.setValue(5)
         f.addRow("Toleranz Spannung:", self.toleranz)
@@ -257,7 +306,7 @@ class NetzteilReiter(QWidget):
         for i, v in enumerate(nt.TRIGGER_SPANNUNGEN):
             haken = QCheckBox(f"{_kurz(v)} V")
             haken.setChecked(v <= 12)
-            haken.toggled.connect(self._dauer_zeigen)
+            haken.toggled.connect(self._angabe_zeigen)
             a = self._zahlfeld(0, 5, 2, 0.25, " A", "unbekannt – ermitteln")
             sb.addWidget(haken, i + 1, 0)
             sb.addWidget(a, i + 1, 1)
@@ -277,6 +326,7 @@ class NetzteilReiter(QWidget):
         links.addWidget(g)
 
         g = QGroupBox("Tests")
+        self.tests_gruppe = g
         f = QGridLayout(g)
         self.mit_stufen = QCheckBox("Stufentest")
         self.mit_stufen.setChecked(True)
@@ -315,28 +365,34 @@ class NetzteilReiter(QWidget):
         self.max_proz.setValue(130)
         self.max_proz.setPrefix("bis ")
         self.max_proz.setSuffix(" %")
-        self.bis_ende = QCheckBox("bis zum Ende")
+        self.bis_ende = QCheckBox("bis zur Abschaltung ⚠")
         self.bis_ende.setToolTip("Weiter steigern, bis das Netzteil abschaltet oder die Spannung einbricht - "
                                  "höchstens 5 A bei USB und 150 W. Zeigt die größte Leistung.")
-        self.bis_ende.toggled.connect(lambda an: (self.max_proz.setEnabled(not an and not self.laeuft),
-                                                  self._dauer_zeigen()))
+        self.bis_ende.toggled.connect(self._bis_ende_umschalten)
         f.addWidget(self.mit_abschalt, 2, 0)
         f.addWidget(self.max_proz, 2, 1)
         f.addWidget(self.bis_ende, 2, 2)
-        f.addWidget(QLabel("Temperaturgrenze:"), 3, 0)
+        self.warnung_ende = QLabel("⚠ Das Netzteil wird bis zum Abschalten überlastet. Ein Gerät ohne "
+                                   "Schutzschaltung kann dabei kaputtgehen oder sehr heiß werden. Nur unter "
+                                   "Aufsicht prüfen, nichts Brennbares in der Nähe.")
+        self.warnung_ende.setWordWrap(True)
+        self.warnung_ende.setStyleSheet("color:#d03b3b; font-weight:bold;")
+        self.warnung_ende.hide()
+        f.addWidget(self.warnung_ende, 3, 0, 1, 3)
+        f.addWidget(QLabel("Temperaturgrenze:"), 4, 0)
         self.temp_grenze = QSpinBox()
         self.temp_grenze.setRange(30, 120)
         self.temp_grenze.setValue(70)
         self.temp_grenze.setSuffix(" °C")
         self.temp_grenze.setToolTip("Gilt für den Temperaturfühler des DL24 - am Netzteil festkleben")
-        f.addWidget(self.temp_grenze, 3, 1)
+        f.addWidget(self.temp_grenze, 4, 1)
         hinweis = QLabel("Temperatur: den Fühler des DL24 mit Klebeband ans Gehäuse des Netzteils kleben. "
                          "Ohne Fühler wird sie nicht gemessen.")
         hinweis.setWordWrap(True)
         hinweis.setStyleSheet(gedaempft())
-        f.addWidget(hinweis, 4, 0, 1, 3)
+        f.addWidget(hinweis, 5, 0, 1, 3)
         self.dauer = QLabel()
-        f.addWidget(self.dauer, 5, 0, 1, 3)
+        f.addWidget(self.dauer, 6, 0, 1, 3)
         knoepfe = QHBoxLayout()
         self.knopf_start = QPushButton("▶  Prüfen")
         self.knopf_start.setStyleSheet("font-weight: bold; padding: 8px;")
@@ -346,12 +402,17 @@ class NetzteilReiter(QWidget):
         self.knopf_abbruch.clicked.connect(lambda: self.abbrechen())
         knoepfe.addWidget(self.knopf_start, 2)
         knoepfe.addWidget(self.knopf_abbruch, 1)
-        f.addLayout(knoepfe, 6, 0, 1, 3)
+        f.addLayout(knoepfe, 7, 0, 1, 3)
         self.steuer_hinweis = QLabel()
         self.steuer_hinweis.setWordWrap(True)
         self.steuer_hinweis.setStyleSheet(gedaempft())
-        f.addWidget(self.steuer_hinweis, 7, 0, 1, 3)
+        f.addWidget(self.steuer_hinweis, 8, 0, 1, 3)
         links.addWidget(g)
+        self.sperr_hinweis = QLabel("⬆  Erst oben die Angaben vom Typenschild eintragen oder eine Vorlage wählen – "
+                                    "dann lassen sich die Tests einstellen.")
+        self.sperr_hinweis.setWordWrap(True)
+        self.sperr_hinweis.setStyleSheet("color:#c77700; font-weight:bold;")
+        links.insertWidget(links.indexOf(g), self.sperr_hinweis)
         links.addStretch(1)
         lw = QWidget()
         lw.setLayout(links)
@@ -516,20 +577,43 @@ class NetzteilReiter(QWidget):
     def _vorlage(self, _=None) -> None:
         d = self.vorlage.currentData()
         if d:
-            v, a = d
+            v, a, name = d
+            self.unbekannt.setChecked(False)
             self.nenn_v.setValue(v)
             self.nenn_a.setValue(a)
-            if not self.name.text().strip():
-                self.name.setPlaceholderText(self.vorlage.currentText())
-        elif self.nenn_v.value() == 0:
-            self.nenn_v.setValue(5.0)
-            self.nenn_a.setValue(1.0)
+            self.name.setPlaceholderText(name)
         self._angabe_zeigen()
+
+    def _bis_ende_umschalten(self, an: bool) -> None:
+        if an and not self.f._frage(
+                "Bis zur Abschaltung prüfen",
+                "Achtung: Bei diesem Test wird das Netzteil absichtlich überlastet, bis es abschaltet oder die "
+                "Spannung zusammenbricht.\n\n"
+                "• Gute Netzteile schalten sich dabei einfach ab – das ist ihr Schutz.\n"
+                "• Billige Netzteile ohne Schutzschaltung können dabei kaputtgehen, sehr heiß werden oder im "
+                "schlimmsten Fall brennen.\n\n"
+                "Nur unter Aufsicht prüfen, nichts Brennbares in der Nähe, und abbrechen, wenn es riecht oder "
+                "knistert.\n\nTrotzdem bis zur Abschaltung prüfen?"):
+            self.bis_ende.blockSignals(True)
+            self.bis_ende.setChecked(False)
+            self.bis_ende.blockSignals(False)
+            an = False
+        if an and not self.mit_abschalt.isChecked():
+            self.mit_abschalt.setChecked(True)
+        self.warnung_ende.setVisible(an)
+        self.max_proz.setEnabled(not an and not self.laeuft)
+        self._dauer_zeigen()
+
+    def _felder_sperren(self) -> None:
+        frei = not self.laeuft and not self.schnell.isChecked()
+        for w in (self.vorlage, self.nenn_v, self.unbekannt):
+            w.setEnabled(frei)
+        for w in (self.nenn_a, self.nenn_w):
+            w.setEnabled(frei and not self.unbekannt.isChecked())
 
     def _schnell_umschalten(self, an: bool) -> None:
         self.schnell_box.setVisible(an)
-        for w in (self.vorlage, self.nenn_v, self.nenn_a, self.nenn_w):
-            w.setEnabled(not an and not self.laeuft)
+        self._felder_sperren()
         self._angabe_zeigen()
 
     def _trigger_stufen(self) -> list[tuple[float, float]]:
@@ -551,7 +635,31 @@ class NetzteilReiter(QWidget):
             max_proz=self.max_proz.value(), temp_grenze=self.temp_grenze.value(),
             bis_ende=self.bis_ende.isChecked(), kabel_mohm=self.kabel.value())
 
+    def _unbekannt_umschalten(self, an: bool) -> None:
+        if an:
+            for feld in (self.nenn_a, self.nenn_w):
+                feld.blockSignals(True)
+                feld.setValue(0)
+                feld.blockSignals(False)
+        self._felder_sperren()
+        self._angabe_zeigen()
+
+    def bereit(self) -> bool:
+        """Sind genug Angaben da, um zu prüfen?"""
+        if self.schnell.isChecked():
+            return bool(self._trigger_stufen())
+        if self.nenn_v.value() <= 0:
+            return False
+        return self.nenn_a.value() > 0 or self.unbekannt.isChecked()
+
+    def _freigeben(self) -> None:
+        ok = self.bereit()
+        self.tests_gruppe.setEnabled(ok or self.laeuft)
+        self.sperr_hinweis.setVisible(not ok and not self.laeuft)
+        self.knopf_start.setEnabled(getattr(self, "_steuer_ok", False) and ok and not self.laeuft)
+
     def _angabe_zeigen(self) -> None:
+        self._freigeben()
         e = self.einstellung()
         teile = []
         if self.schnell.isChecked():
@@ -562,8 +670,8 @@ class NetzteilReiter(QWidget):
             teile.append(f"Erlaubt: {zahl(e.untere_v)}–{zahl(e.obere_v)} V")
         if e.nenn_a == 0 and e.nenn_w > 0 and e.nenn_v > 0:
             teile.append(f"Strom aus der Leistung: {zahl(e.strom_a)} A")
-        if e.nenn_a == 0 and e.nenn_w == 0 and e.nenn_v > 0:
-            teile.append("Strom unbekannt: die App ermittelt, wie viel es liefert")
+        if self.unbekannt.isChecked():
+            teile.append("Die App ermittelt, wie viel es liefert")
         if e.nenn_v > 5.5:
             teile.append("USB-C/Schnellladen: höhere Spannungen gibt das Ladegerät nur mit einem "
                          "Trigger-Adapter heraus (PD/QC) - sonst kommen nur 5 V")
@@ -575,7 +683,9 @@ class NetzteilReiter(QWidget):
         e = self.einstellung()
         if self.schnell.isChecked():
             return [nt.trigger_einstellung(e, v, a) for v, a in self._trigger_stufen()]
-        if e.nenn_v > 0 and e.strom_a <= 0:
+        if not self.bereit():
+            return []
+        if self.unbekannt.isChecked() or e.strom_a <= 0:
             return [nt.ermitteln(e, usb=e.nenn_v <= 5.5)]
         return [e]
 
@@ -606,12 +716,13 @@ class NetzteilReiter(QWidget):
 
     def zustand_zeigen(self, g, anderer_test: bool) -> None:
         steuerbar = bool(g and g.kann_steuern and g.protokoll != "unbekannt")
-        self.knopf_start.setEnabled(steuerbar and not self.laeuft and not anderer_test)
+        self._steuer_ok = steuerbar and not anderer_test
+        self.knopf_start.setEnabled(self._steuer_ok and not self.laeuft and self.bereit())
         self.knopf_abbruch.setEnabled(self.laeuft)
         for w in (self.trigger_felder() + [self.schnell]):
             w.setEnabled(not self.laeuft)
-        for w in (self.vorlage, self.nenn_v, self.nenn_a, self.nenn_w):
-            w.setEnabled(not self.laeuft and not self.schnell.isChecked())
+        self._felder_sperren()
+        self._freigeben()
         self.max_proz.setEnabled(not self.laeuft and not self.bis_ende.isChecked())
         for w in (self.name, self.toleranz,
                   self.mit_stufen, self.stufen, self.stufe_s, self.mit_dauer, self.dauer_proz,
@@ -857,7 +968,7 @@ class NetzteilReiter(QWidget):
         d = self._gewaehlt()
         if not d or self.laeuft:
             return
-        self._zeigen(d["einstellung"], d["ergebnis"])
+        self._zeigen(d["einstellung"], d["ergebnis"], d["wann"])
         self.ergebnis.show()
         self.ergebnis_rahmen.show()
         k = d["kurve"]
@@ -875,8 +986,9 @@ class NetzteilReiter(QWidget):
         self._kurven(k)                     # Achse mit der Toleranzlinie neu setzen
         self.bild.enableAutoRange(x=True)
 
-    def _zeigen(self, e: dict, r: dict) -> None:
+    def _zeigen(self, e: dict, r: dict, wann: float | None = None) -> None:
         self._angezeigt = (dict(e), dict(r))
+        self._angezeigt_wann = wann
         self.ergebnis.setText(ergebnis_html(e, r))
         self.knopf_pdf.setEnabled(True)
         self.knopf_kabel.setEnabled(bool(r.get("widerstand_mohm")) and not e.get("kabel_mohm"))
@@ -902,14 +1014,29 @@ class NetzteilReiter(QWidget):
                                                   f"Prüfbericht {name} {datetime.now():%Y-%m-%d}.pdf", "PDF (*.pdf)")
             if not pfad:
                 return None
-        bild = self.flaeche.grab().toImage()
+        bild = self._hell_abfotografieren()
         doc = QTextDocument()
         doc.addResource(QTextDocument.ImageResource, QUrl("kurve.png"), bild)
         breite = 640
-        doc.setHtml(f"<h2>Prüfbericht Netzteil / Ladegerät</h2>"
-                    f"<p style='color:gray'>Gemessen mit Atorch DL24 · {datetime.now():%d.%m.%Y %H:%M}</p>"
-                    + ergebnis_html(e, r) +
-                    f"<p><img src='kurve.png' width='{breite}'></p>")
+        name = html.escape(e.get("name") or "Netzteil")
+        if e.get("trigger"):
+            angabe = "Schnellladegerät (über Trigger-Adapter)"
+        elif e.get("unbekannt"):
+            angabe = f"{_kurz(e['nenn_v'])} V, Leistung nicht angegeben"
+        else:
+            strom = e["nenn_a"] or (e["nenn_w"] / e["nenn_v"] if e["nenn_v"] else 0)
+            angabe = f"{_kurz(e['nenn_v'])} V / {_kurz(round(strom, 2))} A ({_kurz(round(e['nenn_v'] * strom, 1))} W)"
+        wann = datetime.fromtimestamp(self._angezeigt_wann) if getattr(self, "_angezeigt_wann", None) \
+            else datetime.now()
+        doc.setHtml(
+            f"<h2>Prüfbericht: {name}</h2>"
+            f"<p style='color:gray'>Angabe auf dem Gerät: {angabe} · geprüft am {wann:%d.%m.%Y um %H:%M} Uhr</p>"
+            f"<h3>Kurz gesagt</h3>{kurz_html(e, r)}"
+            f"<h3>Was wurde geprüft?</h3><p>{geprueft_text(e, r)}</p>"
+            f"<p><img src='kurve.png' width='{breite}'></p>"
+            "<p style='color:gray'>Oben: Spannung (rote Linie = Untergrenze). Mitte: Strom und Leistung. "
+            "Unten: Temperatur, wenn ein Fühler angebracht war.</p>"
+            f"<h3>Messwerte für Fachleute</h3>{ergebnis_html(e, r, fach=True)}")
         w = QPdfWriter(pfad)
         w.setPageSize(QPageSize(QPageSize.A4))
         w.setPageMargins(QMarginsF(15, 15, 15, 15), QPageLayout.Millimeter)
@@ -918,6 +1045,23 @@ class NetzteilReiter(QWidget):
         doc.print_(w)
         log.info("Bericht gespeichert: %s", pfad)
         return pfad
+
+    def _hell_abfotografieren(self):
+        """Das Diagramm fürs PDF immer hell - dunkel lässt es sich schlecht drucken."""
+        vorne = pg.getConfigOption("foreground")
+        achsen = [b.getAxis(a) for b in (self.bild, self.bild_i, self.bild_t)
+                  for a in ("left", "bottom", "right")]
+        self.flaeche.setBackground("w")
+        for a in achsen:
+            a.setPen("k")
+            a.setTextPen("k")
+        try:
+            return self.flaeche.grab().toImage()
+        finally:
+            self.flaeche.setBackground(None)
+            for a in achsen:
+                a.setPen(vorne)
+                a.setTextPen(vorne)
 
     def loeschen(self) -> None:
         d = self._gewaehlt()

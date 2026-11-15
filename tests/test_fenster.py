@@ -203,15 +203,18 @@ def test_netzteil_reiter():
     f.reiter.setCurrentIndex(2)
     assert f.reiter.tabText(2).startswith("Ladegeräte")
     assert not f.nt.knopf_start.isEnabled()                 # nicht verbunden
+    assert not f.nt.tests_gruppe.isEnabled() and f.nt.nenn_v.value() == 0   # erst Typenschild
     f.anschluss.setCurrentIndex(f.anschluss.findText("Simulator – USB-Ladegerät", flags=fenster.Qt.MatchStartsWith))
     f.verbinden_umschalten()
     assert warten(lambda: f.geraet is not None), meldungen
     assert warten(lambda: f.letzter is not None)
-    assert f.nt.knopf_start.isEnabled()
+    assert not f.nt.knopf_start.isEnabled()                 # verbunden, aber noch keine Angaben
     # Watt eintragen → Ampere stellt sich selbst ein, und umgekehrt
     f.nt.vorlage.setCurrentIndex(f.nt.vorlage.findText("USB-Hub 10 W", flags=fenster.Qt.MatchStartsWith))
     f.nt._vorlage()
     assert f.nt.vorlage.currentText() == "USB-Hub 10 W – 5 V / 2 A (10 W)", f.nt.vorlage.currentText()
+    assert f.nt.knopf_start.isEnabled() and f.nt.tests_gruppe.isEnabled()
+    assert f.nt.name.placeholderText() == "USB-Hub 10 W"
     assert f.nt.nenn_a.value() == 2.0 and f.nt.nenn_w.value() == 10.0
     f.nt.nenn_w.setValue(12)
     assert abs(f.nt.nenn_a.value() - 2.4) < 1e-9
@@ -220,7 +223,15 @@ def test_netzteil_reiter():
     f.nt.nenn_v.setValue(9)
     assert f.nt.nenn_a.value() == 3 and f.nt.nenn_w.value() == 27
     f.nt.nenn_a.setValue(0)
-    assert f.nt.nenn_w.value() == 0 and "ermittelt" in f.nt.angabe_hinweis.text()
+    assert f.nt.nenn_w.value() == 0
+    assert not f.nt.bereit() and not f.nt.tests_gruppe.isEnabled() and f.nt.sperr_hinweis.isVisible()
+    f.nt.unbekannt.setChecked(True)                           # "steht nicht drauf"
+    assert f.nt.bereit() and f.nt.tests_gruppe.isEnabled() and not f.nt.nenn_a.isEnabled()
+    assert "ermittelt" in f.nt.angabe_hinweis.text()
+    # bis zur Abschaltung nur mit Warnung
+    f.nt.bis_ende.setChecked(True)
+    assert f.nt.warnung_ende.isVisible() and f.nt.mit_abschalt.isChecked() and not f.nt.max_proz.isEnabled()
+    f.nt.bis_ende.setChecked(False)
     f.nt.vorlage.setCurrentIndex(f.nt.vorlage.findText("USB-Ladegerät 10 W", flags=fenster.Qt.MatchStartsWith))
     f.nt._vorlage()
     assert f.nt.nenn_v.value() == 5.0 and f.nt.nenn_a.value() == 2.0 and f.nt.nenn_w.value() == 10.0
@@ -306,6 +317,8 @@ def test_steuerung_von_hand():
     f.steuerung.last(True)
     assert meldungen and "150 W" in meldungen[0]
     # Stop während einer Netzteilprüfung bricht sie ab
+    f.nt.vorlage.setCurrentIndex(f.nt.vorlage.findText("USB-Ladegerät 10 W", flags=fenster.Qt.MatchStartsWith))
+    f.nt._vorlage()
     f.nt.mit_dauer.setChecked(False)
     f.nt.stufen.setValue(2)
     f.nt.starten()
