@@ -30,19 +30,28 @@ ZUSAMMENBRUCH = 0.5       # unter 50 % der Nennspannung gilt das Netzteil als au
 
 # Typenschild-Vorlagen: Name, Volt, Ampere
 VORLAGEN = [
-    ("USB 2.0 Port (5 V / 0,5 A)", 5.0, 0.5),
-    ("USB 3.0 Port (5 V / 0,9 A)", 5.0, 0.9),
-    ("USB-Ladegerät 5 V / 1 A", 5.0, 1.0),
-    ("USB-Ladegerät 5 V / 2 A", 5.0, 2.0),
-    ("USB-Ladegerät 5 V / 2,4 A", 5.0, 2.4),
-    ("USB-C 5 V / 3 A", 5.0, 3.0),
-    ("Netzteil 9 V / 2 A", 9.0, 2.0),
-    ("Netzteil 12 V / 1 A", 12.0, 1.0),
-    ("Netzteil 12 V / 2 A", 12.0, 2.0),
-    ("Netzteil 12 V / 5 A", 12.0, 5.0),
-    ("Netzteil 19 V / 3,42 A", 19.0, 3.42),
-    ("Netzteil 24 V / 2,5 A", 24.0, 2.5),
+    ("USB 2.0 Port", 5.0, 0.5),
+    ("USB 3.0 Port", 5.0, 0.9),
+    ("USB-Hub 10 W", 5.0, 2.0),
+    ("USB-Hub 15 W", 5.0, 3.0),
+    ("USB-Hub 20 W", 5.0, 4.0),
+    ("USB-Ladegerät 5 W", 5.0, 1.0),
+    ("USB-Ladegerät 10 W", 5.0, 2.0),
+    ("USB-Ladegerät 12 W", 5.0, 2.4),
+    ("USB-C 15 W", 5.0, 3.0),
+    ("Netzteil 9 V", 9.0, 2.0),
+    ("Netzteil 12 V", 12.0, 1.0),
+    ("Netzteil 12 V", 12.0, 2.0),
+    ("Netzteil 12 V", 12.0, 5.0),
+    ("Laptop-Netzteil 65 W", 19.0, 3.42),
+    ("Netzteil 24 V", 24.0, 2.5),
 ]
+
+
+def vorlage_text(name: str, v: float, a: float) -> str:
+    """So steht es in der Liste: Name, Spannung, Strom und Leistung."""
+    z = lambda x: f"{x:g}".replace(".", ",")
+    return f"{name} – {z(v)} V / {z(a)} A ({z(round(v * a, 1))} W)"
 
 
 @dataclass
@@ -155,6 +164,7 @@ class NetzteilErgebnis:
     vollstaendig: bool = False
     haelt: bool | None = None            # hält es die Angabe? None = nicht entscheidbar
     hinweise: list[str] = field(default_factory=list)
+    marken: list = field(default_factory=list)       # [(Sekunde, "0,40 A"), …] - Stufenwechsel fürs Diagramm
 
     def als_dict(self) -> dict:
         d = dict(self.__dict__)
@@ -275,6 +285,9 @@ class NetzteilAblauf:
             self._fertig()
             return
         self._schritt_t0 = m.zeit
+        art = {"stufe": "", "dauer": "Dauer ", "abschalt": "↑ "}[s.art]
+        self.ergebnis.marken.append((round(m.zeit - (self._t0 or m.zeit), 1),
+                                     f"{art}{s.soll_a:.2f} A".replace(".", ",")))
         self._werte = []
         self._aus = self._zu_wenig = 0
         self.geraet.strom_setzen(s.soll_a)
@@ -390,6 +403,7 @@ class TriggerErgebnis:
     grund: str = ""
     vollstaendig: bool = False
     haelt: bool | None = None
+    marken: list = field(default_factory=list)
 
     def als_dict(self) -> dict:
         return dict(self.__dict__)
@@ -481,7 +495,11 @@ class TriggerAblauf:
             if self.zustand == "umschalten":
                 self._umschalten(m)
             elif self.teil is not None:
-                self.teil.messwert(m)
+                teil, v = self.teil, self.ziel[0]       # nach messwert() kann schon der nächste dran sein
+                vorher = len(teil.ergebnis.marken)
+                teil.messwert(m)
+                for _, text in teil.ergebnis.marken[vorher:]:
+                    self.ergebnis.marken.append((round(m.zeit - self._t0, 1), f"{v:g} V {text}"))
         except Exception as ex:
             log.exception("Triggerprüfung")
             self.abbrechen(f"Fehler: {ex}")

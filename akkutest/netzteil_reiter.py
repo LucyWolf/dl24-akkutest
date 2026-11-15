@@ -155,6 +155,7 @@ class NetzteilReiter(QWidget):
         super().__init__()
         self.f = fenster
         self.ablauf: nt.NetzteilAblauf | None = None
+        self._marken: list = []
         self._bauen()
         self._vorlage(0)
         self.verlauf_laden()
@@ -169,7 +170,7 @@ class NetzteilReiter(QWidget):
         self.vorlage = QComboBox()
         self.vorlage.addItem("– eigene Angabe –", None)
         for name, v, a in nt.VORLAGEN:
-            self.vorlage.addItem(name, (v, a))
+            self.vorlage.addItem(nt.vorlage_text(name, v, a), (v, a))
         self.vorlage.activated.connect(self._vorlage)
         f.addRow("Vorlage:", self.vorlage)
         self.name = QLineEdit()
@@ -292,8 +293,11 @@ class NetzteilReiter(QWidget):
         lw.setMaximumWidth(450)
         h.addWidget(lw)
 
-        for w in (self.nenn_v, self.nenn_a, self.nenn_w, self.toleranz):
-            w.valueChanged.connect(self._angabe_zeigen)
+        # Strom und Leistung hängen zusammen: wer eins einträgt, bekommt das andere
+        self.nenn_v.valueChanged.connect(lambda _: self._abgleich("v"))
+        self.nenn_a.valueChanged.connect(lambda _: self._abgleich("a"))
+        self.nenn_w.valueChanged.connect(lambda _: self._abgleich("w"))
+        self.toleranz.valueChanged.connect(self._angabe_zeigen)
         for w in (self.stufen, self.stufe_s, self.dauer_min, self.max_proz):
             w.valueChanged.connect(self._dauer_zeigen)
         for w in (self.mit_stufen, self.mit_dauer, self.mit_abschalt):
@@ -385,13 +389,26 @@ class NetzteilReiter(QWidget):
         return w
 
     # ------------------------------------------------------------------
+    def _abgleich(self, geaendert: str) -> None:
+        v, a, w = self.nenn_v.value(), self.nenn_a.value(), self.nenn_w.value()
+        for feld in (self.nenn_a, self.nenn_w):
+            feld.blockSignals(True)
+        if geaendert == "w":
+            self.nenn_a.setValue(w / v if v > 0 and w > 0 else 0)
+        elif geaendert == "a" or a > 0:
+            self.nenn_w.setValue(v * a if a > 0 else 0)
+        elif geaendert == "v" and w > 0:
+            self.nenn_a.setValue(w / v if v > 0 else 0)
+        for feld in (self.nenn_a, self.nenn_w):
+            feld.blockSignals(False)
+        self._angabe_zeigen()
+
     def _vorlage(self, _=None) -> None:
         d = self.vorlage.currentData()
         if d:
             v, a = d
             self.nenn_v.setValue(v)
             self.nenn_a.setValue(a)
-            self.nenn_w.setValue(0)
             if not self.name.text().strip():
                 self.name.setPlaceholderText(self.vorlage.currentText())
         elif self.nenn_v.value() == 0:
@@ -528,6 +545,7 @@ class NetzteilReiter(QWidget):
         self.ergebnis_rahmen.hide()
         self.bild.enableAutoRange()
         self.linie.setData([], [])
+        self._marken_zeichnen([], neu=True)
         if not self.schnell.isChecked():
             self.schritt.setText("Leerlaufspannung messen …")
         log.info("Netzteiltest gestartet: %s", plan)
@@ -546,6 +564,21 @@ class NetzteilReiter(QWidget):
         if ab and ab.laeuft:
             ab.messwert(m)
 
+    def _marken_zeichnen(self, marken: list, neu: bool = False) -> None:
+        """Senkrechte Linien an jedem Stufenwechsel, beschriftet mit dem Strom."""
+        if neu:
+            for linie in getattr(self, "_marken", []):
+                self.bild.removeItem(linie)
+            self._marken = []
+        for t, text in marken[len(self._marken):]:
+            linie = pg.InfiniteLine(pos=t / 60, angle=90, movable=False,
+                                    pen=pg.mkPen((128, 128, 128, 140), width=1, style=Qt.DashLine),
+                                    label=text, labelOpts={"position": 0.04, "rotateAxis": (1, 0),
+                                                           "anchors": [(0, 1), (0, 1)],
+                                                           "color": (140, 140, 140)})
+            self.bild.addItem(linie)
+            self._marken.append(linie)
+
     def messwert(self, m: Messwert) -> None:
         stellen = self.f.geraet.spannung_stellen if self.f.geraet else 3
         self.anz["u"].setzen(zahl(m.spannung, stellen, "V"))
@@ -557,6 +590,7 @@ class NetzteilReiter(QWidget):
             punkte = list(ab.punkte)
             if punkte:
                 self.linie.setData([x[0] / 60 for x in punkte], [x[1] for x in punkte])
+            self._marken_zeichnen(list(ab.ergebnis.marken))
 
     def ereignis(self, art: str, text: str) -> None:
         umschalten = art == "umschalten"
@@ -656,6 +690,8 @@ class NetzteilReiter(QWidget):
         self.ergebnis_rahmen.show()
         k = d["kurve"]
         self.linie.setData([x[0] / 60 for x in k], [x[1] for x in k])
+        self._marken_zeichnen([], neu=True)
+        self._marken_zeichnen(d["ergebnis"].get("marken") or [])
         e = d["einstellung"]
         if e.get("trigger"):
             self.grenze.hide()

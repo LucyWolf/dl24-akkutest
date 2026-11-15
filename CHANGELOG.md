@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.18 – 15.11.2026
+
+- Im Diagramm der Netzteilprüfung steht an jedem Stufenwechsel eine Linie mit
+  dem Strom (bei Schnellladegeräten mit der Spannung) – so ist klar, welcher
+  Abschnitt zu welcher Stufe gehört. Auch bei gespeicherten Prüfungen.
+- Vorlagen zeigen Spannung, Strom **und Watt**, dazu USB-Hubs (10/15/20 W).
+- Strom und Leistung gleichen sich an: Watt eintragen stellt die Ampere ein,
+  Ampere eintragen die Watt.
+
 ## 1.0.17 – 15.11.2026
 
 - **Schnellladegeräte (USB-PD / QC / Fast Charging)** prüfen, mit einem

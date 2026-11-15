@@ -208,9 +208,22 @@ def test_netzteil_reiter():
     assert warten(lambda: f.geraet is not None), meldungen
     assert warten(lambda: f.letzter is not None)
     assert f.nt.knopf_start.isEnabled()
-    f.nt.vorlage.setCurrentIndex(f.nt.vorlage.findText("USB-Ladegerät 5 V / 2 A"))
+    # Watt eintragen → Ampere stellt sich selbst ein, und umgekehrt
+    f.nt.vorlage.setCurrentIndex(f.nt.vorlage.findText("USB-Hub 10 W", flags=fenster.Qt.MatchStartsWith))
     f.nt._vorlage()
-    assert f.nt.nenn_v.value() == 5.0 and f.nt.nenn_a.value() == 2.0
+    assert f.nt.vorlage.currentText() == "USB-Hub 10 W – 5 V / 2 A (10 W)", f.nt.vorlage.currentText()
+    assert f.nt.nenn_a.value() == 2.0 and f.nt.nenn_w.value() == 10.0
+    f.nt.nenn_w.setValue(12)
+    assert abs(f.nt.nenn_a.value() - 2.4) < 1e-9
+    f.nt.nenn_a.setValue(3)
+    assert f.nt.nenn_w.value() == 15
+    f.nt.nenn_v.setValue(9)
+    assert f.nt.nenn_a.value() == 3 and f.nt.nenn_w.value() == 27
+    f.nt.nenn_a.setValue(0)
+    assert f.nt.nenn_w.value() == 0 and "ermittelt" in f.nt.angabe_hinweis.text()
+    f.nt.vorlage.setCurrentIndex(f.nt.vorlage.findText("USB-Ladegerät 10 W", flags=fenster.Qt.MatchStartsWith))
+    f.nt._vorlage()
+    assert f.nt.nenn_v.value() == 5.0 and f.nt.nenn_a.value() == 2.0 and f.nt.nenn_w.value() == 10.0
     f.nt.name.setText("Test-Lader")
     f.nt.stufen.setValue(4)
     f.nt.mit_dauer.setChecked(False)
@@ -229,6 +242,8 @@ def test_netzteil_reiter():
     assert "Hält die Angabe" in text and "schaltet ab bei 2,70 A" in text and "Kennlinie" in text, text
     assert "Temperatur" in text and "°C" in text
     assert not f.geraet.v.geraet.an
+    marken = [x.label.toPlainText() for x in f.nt._marken]
+    assert marken[:4] == ["0,50 A", "1,00 A", "1,50 A", "2,00 A"] and marken[4] == "↑ 2,10 A", marken
     foto(f, "8-netzteil-ergebnis")
     # gespeichert und in der Liste
     alle = sp.netzteil_tests()
@@ -323,6 +338,8 @@ def test_schnellladen_im_fenster():
     print(f.nt.ablauf.ergebnis.grund)
     assert "Unterstützt: 5 V, 9 V" in text and "15 V (übersprungen)" in text, text
     assert "Liefert bis" in text and "ermittelt" in text
+    marken = [x.label.toPlainText() for x in f.nt._marken]
+    assert marken[0] == "5 V 1,00 A" and any(m.startswith("9 V ") for m in marken), marken
     foto(f, "11-trigger-ergebnis")
     alle = sp.netzteil_tests()
     assert alle[0]["name"] == "Schnelllader" and f.nt.tabelle.item(0, 2).text() == "PD/QC 5/9 V", f.nt.tabelle.item(0, 2).text()
