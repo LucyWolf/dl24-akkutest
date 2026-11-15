@@ -396,9 +396,11 @@ class Fenster(QMainWindow):
         knoepfe = QHBoxLayout()
         self.knopf_start = QPushButton("▶  Test starten")
         self.knopf_start.setStyleSheet("font-weight: bold; padding: 8px;")
+        self.knopf_start.setMinimumHeight(self.knopf_start.fontMetrics().height() + 22)   # nie gequetscht
         self.knopf_start.clicked.connect(lambda: self.starten())
         self.knopf_abbruch = QPushButton("■  Abbrechen")
         self.knopf_abbruch.setStyleSheet("padding: 8px;")
+        self.knopf_abbruch.setMinimumHeight(self.knopf_abbruch.fontMetrics().height() + 22)   # nie gequetscht
         self.knopf_abbruch.clicked.connect(lambda: self.abbrechen())
         knoepfe.addWidget(self.knopf_start, 2)
         knoepfe.addWidget(self.knopf_abbruch, 1)

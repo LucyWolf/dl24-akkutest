@@ -215,6 +215,7 @@ def test_netzteil_reiter():
     assert f.nt.vorlage.currentText() == "USB-Hub 10 W – 5 V / 2 A (10 W)", f.nt.vorlage.currentText()
     assert f.nt.knopf_start.isEnabled() and f.nt.tests_gruppe.isEnabled()
     assert f.nt.name.placeholderText() == "USB-Hub 10 W"
+    assert f.nt.einstellung().hub and "Port" in f.nt.angabe_hinweis.text()
     assert f.nt.nenn_a.value() == 2.0 and f.nt.nenn_w.value() == 10.0
     f.nt.nenn_w.setValue(12)
     assert abs(f.nt.nenn_a.value() - 2.4) < 1e-9
@@ -256,6 +257,12 @@ def test_netzteil_reiter():
     text = f.nt.ergebnis.text()
     assert "Empfehlenswert" in text and "Schafft, was es verspricht" in text, text
     assert "schaltet ab bei 2,70 A" in text and "Kennlinie" in text and "Widerstand" in text, text
+    # Ergebnis im eigenen Fenster - öffnet sich nach dem Test von selbst
+    from PySide6.QtWidgets import QTextBrowser
+    text = f.nt._fenster.findChild(QTextBrowser).toPlainText()
+    assert f.nt._fenster.isVisible() and "Kurz gesagt" in text and "Messwerte für Fachleute" in text
+    foto(f.nt._fenster, "12-ergebnisfenster")
+    f.nt._fenster.close()
     # Bericht als PDF
     pdf = Path(os.environ["AKKUTEST_DATEN"]) / "bericht.pdf"
     assert f.nt.bericht_speichern(str(pdf)) == str(pdf)
@@ -282,6 +289,15 @@ def test_netzteil_reiter():
     app.processEvents()
     assert "Empfehlenswert" in f.nt.ergebnis.text()
     assert "✔" in f.nt.tabelle.item(0, 3).text() and "Empfehlenswert" in f.nt.tabelle.item(0, 3).text()
+    # Kabel messen: kurzer Lauf, Wert landet im Feld, nicht in der Liste
+    f.nt.kabel.setValue(500)                 # schon ein Wert drin - neu messen muss trotzdem gehen
+    f.nt.kabel_messen()
+    assert f.nt.laeuft
+    assert warten(lambda: not f.nt.laeuft, 60)
+    app.processEvents()
+    assert 100 <= f.nt.kabel.value() <= 150, f.nt.kabel.value()
+    assert len(sp.netzteil_tests()) == 1 and "eingetragen" in f.nt.schritt.text()
+    f.nt.kabel.setValue(0)
     f.trennen()
     f.close()
 

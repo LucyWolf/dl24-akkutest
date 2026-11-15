@@ -120,6 +120,15 @@ verbunden (oder ein PX100).
 | ✘ Nicht verwenden | Schaltet vor dem angegebenen Strom ab, an der Buchse unter 4,40 V, im Leerlauf über 5,5 V (kann Geräte beschädigen) oder wird zu heiß. |
 | ? Noch nicht entscheidbar | Am Kabelende kam zu wenig an, aber das Kabel ist nicht herausgerechnet – ob es am Gerät oder am Kabel liegt, ist offen. |
 
+**Ampel:** Im Diagramm und in der Kennlinie zeigen Farben, wo die Spannung
+liegt – grün in Ordnung, gelb außerhalb der Vorgabe, aber nutzbar, rot zu
+niedrig oder zu hoch. Dazu je Stufe die **Schwankung** (grün bis 1 %, gelb bis
+3 % – Einschätzung des Programms). Schnelles Brummen (Ripple) sieht der DL24
+nicht, dafür braucht es ein Oszilloskop.
+
+**USB-Hubs:** Geprüft wird immer nur der Port, an dem der DL24 steckt. Die
+Angabe auf dem Hub gilt meist für alle Ports zusammen.
+
 **Grundlage bei USB:** die USB-Spezifikation 2.0, Abschnitt 7.2.2 (auch als
 Norm EN 62680-2-1 veröffentlicht): An einem Port mit eigener Stromversorgung
 4,75–5,25 V, gemessen an der Buchse; 4,40 V nur bei Schwachstrom-Ports. Das ist
@@ -142,8 +151,9 @@ Diagramm, die Messwerte für Fachleute am Ende.
 
 **Das Kabel zählt mit.** Gemessen wird am DL24, also hinter Kabel und Adapter.
 Ein dünnes USB-Kabel verliert bei 2 A leicht 0,5 V. Damit das nicht dem
-Netzteil angelastet wird: dasselbe Kabel einmal an einem **guten Ladegerät**
-prüfen, im Ergebnis **„Widerstand als Kabelwert übernehmen“** drücken. Ab dann
+Netzteil angelastet wird: dasselbe Kabel an ein **gutes Ladegerät** stecken und
+neben „Kabel + Adapter“ auf **„Kabel messen …“** drücken (oder nach einer
+Prüfung „Widerstand als Kabelwert übernehmen“). Ab dann
 wird das Kabel herausgerechnet, und das Urteil gilt für die Spannung an der
 Buchse.
 

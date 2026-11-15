@@ -177,7 +177,8 @@ def test_urteil_mit_und_ohne_kabel():
     # wie Lucys Hub: gleichmäßig 0,34 Ω - bei 2 A kommen am Kabelende nur 4,37 V an
     def hub(kabel):
         q = SimNetzteil(5.0, innen_mohm=340, abschalt_a=9)
-        e = nt.NetzteilEinstellung("Hub", 5.0, 2.0, stufen=5, stufe_s=10, dauertest=False, kabel_mohm=kabel)
+        e = nt.NetzteilEinstellung("Hub", 5.0, 2.0, stufen=5, stufe_s=10, dauertest=False, kabel_mohm=kabel,
+                                   hub=True)
         return durchspielen(q, e)[0].ergebnis
     ohne = hub(0)
     print("Hub ohne Kabelwert:", ohne.urteil, ohne.widerstand_mohm, ohne.laien)
@@ -191,6 +192,12 @@ def test_urteil_mit_und_ohne_kabel():
     knapp = hub(150)                        # Buchse 4,67 V: unter 4,75 V, über 4,40 V
     assert knapp.urteil == "eingeschraenkt" and knapp.spez_verletzt, (knapp.urteil, knapp.gruende)
     assert any("entspricht damit nicht den Vorgaben" in t for t in knapp.laien), knapp.laien
+    # ab welcher Last unterschritten - und dass es keine stabile Spannung mehr hält
+    assert knapp.unter_ab_a is not None and knapp.unter_ab_a <= 2.0
+    assert any("Mindestwert wurde unterschritten" in t and "keine stabile Spannung" in t for t in knapp.laien), \
+        knapp.laien
+    assert any("Ob das am Gerät oder am Kabel liegt" in t for t in ohne.laien), ohne.laien
+    assert any("einzelner Port des Hubs" in t and "10 Watt" in t for t in ohne.laien), ohne.laien
     assert any("§7.2.2" in g for g in knapp.gruende)
     tief = SimNetzteil(5.0, innen_mohm=600, abschalt_a=9)
     e = nt.NetzteilEinstellung("Mies", 5.0, 2.0, stufen=2, stufe_s=10, dauertest=False, kabel_mohm=100)
@@ -219,6 +226,21 @@ def test_maximum_suchen():
                                  abschalttest=True, bis_ende=True)
     r = durchspielen(SimNetzteil(5.0, innen_mohm=20, abschalt_a=99, heiz_c_je_w=0.5), nie, tempo=300)[0].ergebnis
     assert r.abschalt_a is None and "5 A bei USB" in r.grund and r.max_getestet_a == 5.0, r.grund
+
+
+def test_unruhige_spannung():
+    q = SimNetzteil(5.0, innen_mohm=60, abschalt_a=9, rauschen_v=0.3)
+    e = nt.NetzteilEinstellung("Unruhig", 5.0, 1.0, stufen=2, stufe_s=20, dauertest=False, kabel_mohm=60)
+    r = durchspielen(q, e)[0].ergebnis
+    print("unruhig:", r.urteil, r.schwankung_mv, r.gruende)
+    assert r.schwankung_mv > 150 and r.urteil == "eingeschraenkt"
+    assert any("unruhig" in t for t in r.laien)
+    assert nt.ampel(e, 4.8) == "gruen" and nt.ampel(e, 4.6) == "gelb" and nt.ampel(e, 4.3) == "rot"
+    assert nt.ampel(e, 5.3) == "gelb" and nt.ampel(e, 5.6) == "rot"
+    ruhig = durchspielen(SimNetzteil(5.0, innen_mohm=60, abschalt_a=9),
+                         nt.NetzteilEinstellung("Ruhig", 5.0, 1.0, stufen=2, stufe_s=20, dauertest=False,
+                                                kabel_mohm=60))[0].ergebnis
+    assert ruhig.schwankung_mv < 20 and ruhig.urteil == "gut", (ruhig.schwankung_mv, ruhig.urteil)
 
 
 if __name__ == "__main__":

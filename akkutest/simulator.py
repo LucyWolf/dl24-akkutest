@@ -48,7 +48,9 @@ class SimNetzteil:
     """Ein Netzteil statt eines Akkus: Spannung sinkt mit dem Strom, über der
     Abschaltgrenze geht es aus, bis die Last weg ist. Wird mit der Zeit warm."""
 
-    def __init__(self, nenn_v=5.0, innen_mohm=120.0, abschalt_a=3.0, tol_a=None, raum_c=22.0, heiz_c_je_w=4.0):
+    def __init__(self, nenn_v=5.0, innen_mohm=120.0, abschalt_a=3.0, tol_a=None, raum_c=22.0, heiz_c_je_w=4.0,
+                 rauschen_v=0.0):
+        self.rauschen = rauschen_v           # unruhiges Netzteil: so viel springt die Spannung
         self.nenn_v, self.innen = nenn_v, innen_mohm / 1000
         self.abschalt_a = abschalt_a
         self.knick_a = tol_a                 # ab hier sackt die Spannung stark ab
@@ -67,9 +69,13 @@ class SimNetzteil:
         u = self.nenn_v + 0.05 - strom * self.innen
         if self.knick_a and strom > self.knick_a:
             u -= (strom - self.knick_a) * 2.0
+        if self.rauschen:
+            # gleichmäßige Sägezahn-Schwankung statt Zufall - der Test soll nicht wackeln
+            u += self.rauschen * ((getattr(self, "_t", 0.0) % 7) / 7 - 0.5)
         return max(u, 0.0)
 
     def schritt(self, dt: float, strom: float) -> None:
+        self._t = getattr(self, "_t", 0.0) + dt
         ziel = self.raum + self.spannung(strom) * strom * self.heiz
         self.temperatur += (ziel - self.temperatur) * min(1.0, dt / 300)
 

@@ -37,6 +37,8 @@ class Messwert:
     wh_geraet: float | None = None
     temperatur: float | None = None
     temp_fuehler: float | None = None   # Fühler am Kabel (USB); None = keiner angesteckt
+    temp_cpu: float | None = None       # USB: dritte Temperatur im Paket (laut Atorch-Software die CPU)
+    temp_roh: tuple | None = None       # USB: alle drei Temperaturen, wie sie kommen (Fühler, CPU, MOS)
 
     @property
     def leistung(self) -> float:
@@ -162,7 +164,8 @@ class Geraet:
             if self.bei_messwert:
                 self.bei_messwert(Messwert(self.v.uhr(), w.spannung, strom, w.an,
                                            w.kapazitaet_mah, w.energie_wh, w.temp_mos,
-                                           w.temp_fuehler if w.temp_fuehler > -40 else None))
+                                           w.temp_fuehler if w.temp_fuehler > -40 else None,
+                                           w.temp_cpu, (w.temp_fuehler, w.temp_cpu, w.temp_mos)))
         else:
             self._antworten.put(("hid", w))
 

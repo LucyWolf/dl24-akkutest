@@ -75,6 +75,7 @@ class NetzteilEinstellung:
     bis_ende: bool = False    # Abschalttest bis zum Abschalten (höchstens 5 A bei USB / 150 W)
     kabel_mohm: float = 0.0   # Kabel + Adapter: wird herausgerechnet (Spannung an der Buchse)
     fuehler: bool = True      # Temperaturfühler des DL24 auswerten (aus: Temperatur ignorieren)
+    hub: bool = False         # USB-Hub: geprüft wird nur ein Port
 
     @property
     def strom_a(self) -> float:
@@ -104,6 +105,14 @@ class NetzteilEinstellung:
     def hoechst_v(self) -> float:
         """Darüber im Leerlauf: gefährlich für angeschlossene Geräte."""
         return 5.5 if self.usb else self.nenn_v * (1 + 2 * self.toleranz_proz / 100)
+
+    def grenzen(self) -> tuple[float, float, float, float]:
+        """Ampel für die Spannung: (rot unter, gelb unter, gelb über, rot über).
+        Zwischen den beiden mittleren ist grün. USB nach der Spezifikation, sonst
+        einfache und doppelte Toleranz um die Angabe."""
+        if self.usb:
+            return USB_SCHWACH_V, USB_MIN_V, USB_MAX_V, GEFAHR_V
+        return self.mindest_v, self.untere_v, self.obere_v, self.hoechst_v
 
     def such_ende_a(self) -> float:
         return max(such_grenze(self.nenn_v, self.usb), self.strom_a) if self.nenn_v > 0 else 0.0
@@ -166,10 +175,15 @@ class StufenWert:
     strom: float
     ok: bool
     buchse_v: float | None = None    # um das Kabel berichtigt (nur mit Kabelwert)
+    max_v: float | None = None       # höchster Wert in der Stufe - zusammen mit min_v die Schwankung
 
     @property
     def leistung(self) -> float:
         return self.spannung * self.strom
+
+    @property
+    def schwankung(self) -> float:
+        return (self.max_v - self.min_v) if self.max_v is not None else 0.0
 
 
 @dataclass
@@ -197,6 +211,9 @@ class NetzteilErgebnis:
     max_w: float | None = None             # höchste Leistung überhaupt (vor dem Abschalten)
     laien: list[str] = field(default_factory=list)   # dasselbe in einfachen Sätzen, für den Bericht
     spez_verletzt: bool = False            # USB: Spannung nachweislich außerhalb der Spezifikation
+    schwankung_mv: float | None = None     # größte Schwankung einer Stufe bis zum Nennstrom
+    unter_ab_a: float | None = None        # ab diesem Strom unter der gelben Grenze (USB 4,75 V)
+    rot_ab_a: float | None = None          # ab diesem Strom unter der roten Grenze (USB 4,40 V)
 
     def als_dict(self) -> dict:
         d = dict(self.__dict__)
@@ -254,6 +271,24 @@ GEFAHR_V = 5.5
 SPEZ = "USB-Spezifikation (USB 2.0, auch als EN 62680-2-1 veröffentlicht)"
 
 
+SCHWANK_GELB = 0.01     # 1 % der Nennspannung (5 V: 50 mV) - Einschätzung der App,
+SCHWANK_ROT = 0.03      # 3 % (5 V: 150 mV) - keine Vorgabe der USB-Spezifikation
+
+
+def ampel(e: NetzteilEinstellung, volt: float) -> str:
+    rot_u, gelb_u, gelb_o, rot_o = e.grenzen()
+    if volt < rot_u - 1e-9 or volt > rot_o + 1e-9:
+        return "rot"
+    if volt < gelb_u - 1e-9 or volt > gelb_o + 1e-9:
+        return "gelb"
+    return "gruen"
+
+
+def schwank_ampel(e: NetzteilEinstellung, delta: float) -> str:
+    anteil = delta / e.nenn_v if e.nenn_v else 0
+    return "rot" if anteil > SCHWANK_ROT else "gelb" if anteil > SCHWANK_GELB else "gruen"
+
+
 def bewerten(e: NetzteilEinstellung, r: NetzteilErgebnis) -> None:
     """Klare Aussage: empfehlenswert, eingeschränkt, nicht verwenden - oder
     offen, wenn das Kabel nicht herausgerechnet ist. Getrennt davon: liefert
@@ -271,6 +306,14 @@ def bewerten(e: NetzteilEinstellung, r: NetzteilErgebnis) -> None:
     gruende: list[str] = []
     schlimm = knapp = offen = False
     r.spez_verletzt = False
+    rot_u, gelb_u, _, _ = e.grenzen()
+    nach_strom = sorted(r.stufen, key=lambda x: x.soll_a)
+    r.unter_ab_a = next((x.soll_a for x in nach_strom if an_buchse(x, x.min_v) < gelb_u), None)
+    r.rot_ab_a = next((x.soll_a for x in nach_strom if an_buchse(x, x.min_v) < rot_u), None)
+    if r.unter_ab_a is not None:
+        wo = "an der Buchse" if kabel else "am Kabelende"
+        gruende.append(f"Unter {_k(gelb_u)} V {wo} ab {_k(r.unter_ab_a)} A"
+                       + (f", unter {_k(rot_u)} V ab {_k(r.rot_ab_a)} A" if r.rot_ab_a is not None else ""))
     ll = r.leerlauf_v
     if ll is not None and e.usb and ll > GEFAHR_V:
         schlimm = r.spez_verletzt = True
@@ -323,6 +366,12 @@ def bewerten(e: NetzteilEinstellung, r: NetzteilErgebnis) -> None:
     if r.zu_heiss:
         schlimm = True
         gruende.append(f"Wird zu heiß (über {_k(e.temp_grenze, None)} °C)")
+    unruhig = max(bis_nenn, key=lambda x: x.schwankung, default=None)
+    r.schwankung_mv = round(unruhig.schwankung * 1000) if unruhig and unruhig.max_v is not None else None
+    if unruhig and schwank_ampel(e, unruhig.schwankung) == "rot":
+        knapp = True
+        gruende.append(f"Spannung schwankt bei {_k(unruhig.soll_a)} A um {_k(unruhig.schwankung * 1000, 0)} mV "
+                       f"(über {_k(SCHWANK_ROT * 100, 0)} % – Einschätzung der App)")
     if schlimm:
         r.urteil = "nicht"
     elif knapp:
@@ -390,6 +439,20 @@ def laien_saetze(e: NetzteilEinstellung, r: NetzteilErgebnis, tiefst: float | No
                      f"(mindestens {_k(e.untere_v)} Volt).")
         else:
             s.append(f"Die Spannung bleibt dabei im erwarteten Bereich (mindestens {_k(tiefst)} Volt).")
+    if r.unter_ab_a is not None and not e.unbekannt:
+        rot_u, gelb_u, _, _ = e.grenzen()
+        ueber = " – also schon unterhalb der Angabe" if r.unter_ab_a < e.strom_a - 1e-6 else (
+            " – erst über der Angabe" if r.unter_ab_a > e.strom_a + 1e-6 else "")
+        if kabel or not e.usb:
+            s.append(f"Ab {_k(r.unter_ab_a)} Ampere fiel die Spannung unter {_k(gelb_u)} Volt – der Mindestwert "
+                     f"wurde unterschritten{ueber}. Ab dieser Last kann das Gerät keine stabile Spannung mehr "
+                     "halten.")
+            if r.rot_ab_a is not None:
+                s.append(f"Ab {_k(r.rot_ab_a)} Ampere lag sie sogar unter {_k(rot_u)} Volt. Spätestens ab hier "
+                         "ist das Gerät für diese Last nicht geeignet.")
+        else:
+            s.append(f"Am Ende des Kabels fiel die Spannung ab {_k(r.unter_ab_a)} Ampere unter {_k(gelb_u)} Volt"
+                     f"{ueber}. Ob das am Gerät oder am Kabel liegt, ist ohne Kabelwert noch offen.")
     ll = r.leerlauf_v
     if ll is not None and e.usb and ll > USB_MAX_V:
         s.append(f"Ohne angeschlossenes Gerät liefert es {_k(ll)} Volt; die {SPEZ} erlaubt höchstens "
@@ -397,6 +460,13 @@ def laien_saetze(e: NetzteilEinstellung, r: NetzteilErgebnis, tiefst: float | No
     elif ll is not None and not e.usb and ll > e.hoechst_v:
         s.append(f"Ohne angeschlossenes Gerät liefert es {_k(ll)} Volt – zu viel. Das kann angeschlossene "
                  "Geräte beschädigen.")
+    if r.schwankung_mv is not None and schwank_ampel(e, r.schwankung_mv / 1000) == "rot":
+        s.append(f"Die Spannung ist unruhig: Sie schwankt bei gleicher Last um {_k(r.schwankung_mv, 0)} "
+                 "Millivolt. Ein gutes Netzteil hält sie deutlich ruhiger.")
+    if e.hub:
+        s.append(f"Geprüft wurde ein einzelner Port des Hubs. Die Angabe von {_k(e.nenn_v * e.strom_a, None)} Watt "
+                 "gilt meist für alle Ports zusammen – mit einem DL24 lässt sich nur ein Port gleichzeitig belasten. "
+                 "Andere Ports können sich anders verhalten.")
     if r.zu_heiss:
         s.append(f"Es wird zu heiß (über {_k(e.temp_grenze, None)} °C). Die Prüfung wurde deshalb abgebrochen.")
     if r.abschalt_a is not None and r.verspricht is not False:
@@ -568,10 +638,12 @@ class NetzteilAblauf:
         v = sum(x.spannung for x in w) / len(w)
         i = sum(x.strom for x in w) / len(w)
         tief = min(x.spannung for x in w)
+        hoch = max(x.spannung for x in w)
         kabel = i * e.kabel_mohm / 1000            # was im Kabel verloren geht
         sw = StufenWert(s.soll_a, round(v, 3), round(tief, 3), round(i, 3),
-                        ok=tief + kabel >= e.untere_v,
-                        buchse_v=round(v + kabel, 3) if e.kabel_mohm else None)
+                        ok=tief + kabel >= e.grenzen()[1],
+                        buchse_v=round(v + kabel, 3) if e.kabel_mohm else None,
+                        max_v=round(hoch, 3))
         if s.art == "dauer":
             self.ergebnis.dauer = sw
         else:

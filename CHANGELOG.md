@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.0.23 – 15.11.2026
+
+- **Ampel für die Spannung:** grün, gelb, rot – im Diagramm als farbige Bänder,
+  in der Kennlinie je Stufe. USB: grün 4,75–5,25 V, gelb bis 4,40 V bzw. 5,5 V,
+  rot darüber hinaus. Mit Kabelwert zeigt das Diagramm die Spannung an der Buchse.
+- **Schwankung** je Stufe (höchster minus tiefster Wert): grün bis 1 %, gelb bis
+  3 %, rot darüber – Einschätzung der App, keine Vorgabe der Spezifikation. Rot
+  wertet das Urteil auf „eingeschränkt“ ab. Hinweis im Bericht, dass schnelles
+  Brummen (Ripple) nur mit einem Oszilloskop messbar ist.
+- Im Bericht steht, **ab welcher Last der Mindestwert unterschritten** wurde und
+  dass das Gerät ab dort keine stabile Spannung mehr hält (ohne Kabelwert für das
+  Kabelende, mit dem Hinweis, dass Gerät oder Kabel schuld sein kann).
+- **USB-Hub:** Hinweis im Bericht und im Formular, dass nur ein Port geprüft
+  wird und die Angabe meist für alle Ports zusammen gilt.
+- **Ergebnis im eigenen Fenster** – öffnet nach der Prüfung von selbst, für alte
+  Prüfungen per Doppelklick oder „Ergebnis groß anzeigen“.
+- **Kabel messen …**: eigener Knopf neben „Kabel + Adapter“ – misst Kabel und
+  Adapter an einem guten Ladegerät und trägt den Wert ein. „Als Kabelwert
+  übernehmen“ geht jetzt auch, wenn schon ein Wert eingetragen ist.
+- Steuerung: alle drei Temperaturen (Fühler, CPU, Kühler/MOS) und die Rohwerte
+  vom Gerät, um zu prüfen, welcher Wert welcher Fühler ist.
+- Knöpfe werden bei kleinem Fenster nicht mehr abgeschnitten; die linke Spalte
+  rollt stattdessen.
+
 ## 1.0.22 – 15.11.2026
 
 - **Bewertung bei USB nach der USB-Spezifikation** (USB 2.0 §7.2.2, auch

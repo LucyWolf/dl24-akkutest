@@ -9,7 +9,7 @@ from datetime import datetime
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QFrame, QGridLayout,
-    QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea, QSpinBox,
+    QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QSpinBox,
     QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 import pyqtgraph as pg
@@ -23,6 +23,16 @@ log = logging.getLogger("akkutest.netzteil")
 
 def _kurz(x: float) -> str:
     return f"{x:g}".replace(".", ",")
+
+
+AMPEL = {"gruen": "#2e9e4f", "gelb": "#c77700", "rot": "#d03b3b"}
+
+
+def einstellung_aus(e: dict) -> nt.NetzteilEinstellung:
+    """Gespeicherte Einstellung zurück ins Objekt - ältere haben nicht alle Felder."""
+    import dataclasses
+    namen = {f.name for f in dataclasses.fields(nt.NetzteilEinstellung)}
+    return nt.NetzteilEinstellung(**{k: v for k, v in e.items() if k in namen})
 
 
 URTEILE = {"gut": ("✔ Empfehlenswert", "#2e9e4f"),
@@ -186,12 +196,28 @@ def ergebnis_html(e: dict, r: dict, fach: bool = False) -> str:
                "<td style='color:gray'>tiefster</td>" + \
                ("<td style='color:gray'>an der Buchse</td>" if buchse else "") + \
                "<td style='color:gray'>Leistung</td><td></td></tr>"
+        ee = einstellung_aus(e)
+        rot_u, gelb_u, gelb_o, rot_o = ee.grenzen()
+        kabel = e.get("kabel_mohm", 0) / 1000
+
+        def zustand(s: dict) -> str:
+            v = s["min_v"] + s["strom"] * kabel
+            z = nt.ampel(ee, v)
+            text = {"gruen": "✔", "gelb": f"⚠ unter {zahl(gelb_u)} V" if v < gelb_u else f"⚠ über {zahl(gelb_o)} V",
+                    "rot": f"✘ unter {zahl(rot_u)} V" if v < rot_u else f"✘ über {zahl(rot_o)} V"}[z]
+            return f"<td style='color:{AMPEL[z]}'>{text}</td>"
+
+        def schwank(s: dict) -> str:
+            if s.get("max_v") is None:
+                return "<td>–</td>"
+            d = s["max_v"] - s["min_v"]
+            return f"<td style='color:{AMPEL[nt.schwank_ampel(ee, d)]}'>{d * 1000:.0f} mV</td>"
+        kopf = kopf.replace("<td></td></tr>", "<td style='color:gray'>Schwankung</td><td></td></tr>")
         reihen = "".join(
             f"<tr><td>{zahl(s['soll_a'], 2)} A</td><td>{zahl(s['spannung'], 3)} V</td>"
             f"<td>{zahl(s['min_v'], 3)} V</td>"
             + (f"<td>{zahl(s.get('buchse_v'), 3)} V</td>" if buchse else "") +
-            f"<td>{zahl(s['spannung'] * s['strom'], 1)} W</td>"
-            f"<td style='color:{'#2e9e4f' if s['ok'] else '#d03b3b'}'>{'✔' if s['ok'] else '✘ unter ' + zahl(unten) + ' V'}</td></tr>"
+            f"<td>{zahl(s['spannung'] * s['strom'], 1)} W</td>" + schwank(s) + zustand(s) + "</tr>"
             for s in stufen)
         zeilen.append("<b>Kennlinie</b><table cellspacing=6>" + kopf + reihen + "</table>")
     for h in r.get("hinweise") or []:
@@ -293,7 +319,14 @@ class NetzteilReiter(QWidget):
                               "damit das Kabel nicht dem Netzteil angelastet wird.\n\nSo bekommst du ihn: dasselbe "
                               "Kabel an einem guten Ladegerät prüfen und im Ergebnis „als Kabelwert übernehmen“.")
         self.kabel.valueChanged.connect(self._angabe_zeigen)
-        f.addRow("Kabel + Adapter:", self.kabel)
+        zeile = QHBoxLayout()
+        zeile.addWidget(self.kabel, 1)
+        self.knopf_kabel_messen = QPushButton("Kabel messen …")
+        self.knopf_kabel_messen.setToolTip("Misst den Widerstand von Kabel und Adapter an einem guten Ladegerät "
+                                           "und trägt ihn hier ein")
+        self.knopf_kabel_messen.clicked.connect(self.kabel_messen)
+        zeile.addWidget(self.knopf_kabel_messen)
+        f.addRow("Kabel + Adapter:", zeile)
         self.schnell = QCheckBox("Schnellladegerät (USB-PD / QC / Fast Charging)")
         self.schnell.setToolTip("9 V, 12 V, 15 V, 20 V gibt das Ladegerät nur über einen Trigger-Adapter heraus")
         self.schnell.toggled.connect(self._schnell_umschalten)
@@ -407,6 +440,9 @@ class NetzteilReiter(QWidget):
         self.knopf_abbruch = QPushButton("■  Abbrechen")
         self.knopf_abbruch.setStyleSheet("padding: 8px;")
         self.knopf_abbruch.clicked.connect(lambda: self.abbrechen())
+        for k in (self.knopf_start, self.knopf_abbruch):
+            k.setMinimumHeight(k.fontMetrics().height() + 22)
+            k.setSizePolicy(k.sizePolicy().horizontalPolicy(), QSizePolicy.Fixed)
         knoepfe.addWidget(self.knopf_start, 2)
         knoepfe.addWidget(self.knopf_abbruch, 1)
         f.addLayout(knoepfe, 7, 0, 1, 3)
@@ -423,8 +459,15 @@ class NetzteilReiter(QWidget):
         links.addStretch(1)
         lw = QWidget()
         lw.setLayout(links)
-        lw.setMaximumWidth(450)
-        h.addWidget(lw)
+        # Rollbar statt gequetscht: sonst schneidet Qt bei kleinem Fenster die Knöpfe ab
+        rolle = QScrollArea()
+        rolle.setWidgetResizable(True)
+        rolle.setFrameShape(QFrame.NoFrame)
+        rolle.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        rolle.setWidget(lw)
+        # So breit wie der Inhalt braucht - schmaler würde Qt rechts abschneiden
+        rolle.setMinimumWidth(lw.sizeHint().width() + rolle.verticalScrollBar().sizeHint().width() + 8)
+        h.addWidget(rolle)
 
         # Strom und Leistung hängen zusammen: wer eins einträgt, bekommt das andere
         self.nenn_v.valueChanged.connect(lambda _: self._abgleich("v"))
@@ -465,9 +508,19 @@ class NetzteilReiter(QWidget):
         self.bild = self.flaeche.addPlot(row=0, col=0)
         self.bild.setLabel("left", "Spannung (V)")
         self.linie = self.bild.plot([], [], pen=pg.mkPen("#2f80ed", width=2))
-        self.grenze = pg.InfiniteLine(angle=0, pen=pg.mkPen("#d03b3b", width=1, style=Qt.DashLine))
+        self.grenze = pg.InfiniteLine(angle=0, pen=pg.mkPen("#c77700", width=1, style=Qt.DashLine))
         self.grenze.hide()
         self.bild.addItem(self.grenze)
+        # Ampel hinter der Kurve: rot · gelb · grün · gelb · rot
+        self.baender = []
+        for farbe in ((208, 59, 59), (199, 119, 0), (46, 158, 79), (199, 119, 0), (208, 59, 59)):
+            band = pg.LinearRegionItem(values=(0, 1), orientation="horizontal", movable=False,
+                                       brush=pg.mkBrush(*farbe, 38), pen=pg.mkPen(None))
+            band.setZValue(-20)
+            band.hide()
+            self.bild.addItem(band, ignoreBounds=True)
+            self.baender.append(band)
+        self._kabel_ohm = 0.0
         self.bild_i = self.flaeche.addPlot(row=1, col=0)
         self.bild_i.setLabel("left", "Strom (A)", color="#2e9e4f")
         self.bild_i.setLabel("right", "Leistung (W)", color="#e08a00")
@@ -531,6 +584,10 @@ class NetzteilReiter(QWidget):
         self.knopf_pdf.clicked.connect(self.bericht_speichern)
         knoepfe.addWidget(self.knopf_kabel)
         knoepfe.addStretch(1)
+        self.knopf_gross = QPushButton("Ergebnis groß anzeigen")
+        self.knopf_gross.clicked.connect(self.ergebnis_fenster)
+        self.knopf_gross.setEnabled(False)
+        knoepfe.addWidget(self.knopf_gross)
         knoepfe.addWidget(self.knopf_pdf)
         self.knopf_kabel.setEnabled(False)
         self.knopf_pdf.setEnabled(False)
@@ -550,6 +607,7 @@ class NetzteilReiter(QWidget):
         self.tabelle.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.tabelle.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.tabelle.itemSelectionChanged.connect(self._alten_zeigen)
+        self.tabelle.itemDoubleClicked.connect(lambda _: self.ergebnis_fenster())
         ul.addWidget(self.tabelle)
         rechts.addWidget(unten)
         rechts.setSizes([560, 180])
@@ -634,6 +692,11 @@ class NetzteilReiter(QWidget):
         if isinstance(self.ablauf, nt.TriggerAblauf):
             self.ablauf.ueberspringen()
 
+    def _ist_hub(self) -> bool:
+        d = self.vorlage.currentData()
+        name = (self.name.text() or self.name.placeholderText()).lower()
+        return bool(d and d[2].startswith("USB-Hub")) or "hub" in name.split("z. b.")[0]
+
     def einstellung(self) -> nt.NetzteilEinstellung:
         return nt.NetzteilEinstellung(
             name=self.name.text().strip() or self.name.placeholderText().split("z. B.")[0].strip()
@@ -644,7 +707,7 @@ class NetzteilReiter(QWidget):
             dauertest=self.mit_dauer.isChecked(), dauer_proz=self.dauer_proz.value(),
             dauer_min=self.dauer_min.value(), abschalttest=self.mit_abschalt.isChecked(),
             max_proz=self.max_proz.value(), temp_grenze=self.temp_grenze.value(),
-            fuehler=self.mit_fuehler.isChecked(),
+            fuehler=self.mit_fuehler.isChecked(), hub=self._ist_hub(),
             bis_ende=self.bis_ende.isChecked(), kabel_mohm=self.kabel.value())
 
     def _unbekannt_umschalten(self, an: bool) -> None:
@@ -684,6 +747,9 @@ class NetzteilReiter(QWidget):
             teile.append(f"Strom aus der Leistung: {zahl(e.strom_a)} A")
         if self.unbekannt.isChecked():
             teile.append("Die App ermittelt, wie viel es liefert")
+        if self._ist_hub():
+            teile.append("USB-Hub: Geprüft wird nur der Port, an dem der DL24 steckt – den Port am besten in den "
+                         "Namen schreiben, z. B. „Hub Port 1“")
         if e.nenn_v > 5.5:
             teile.append("USB-C/Schnellladen: höhere Spannungen gibt das Ladegerät nur mit einem "
                          "Trigger-Adapter heraus (PD/QC) - sonst kommen nur 5 V")
@@ -731,6 +797,7 @@ class NetzteilReiter(QWidget):
         self._steuer_ok = steuerbar and not anderer_test
         self.knopf_start.setEnabled(self._steuer_ok and not self.laeuft and self.bereit())
         self.knopf_abbruch.setEnabled(self.laeuft)
+        self.knopf_kabel_messen.setEnabled(self._steuer_ok and not self.laeuft)
         for w in (self.trigger_felder() + [self.schnell]):
             w.setEnabled(not self.laeuft)
         self._felder_sperren()
@@ -755,6 +822,52 @@ class NetzteilReiter(QWidget):
     def trigger_felder(self) -> list:
         return [w for _, haken, a in self.trigger for w in (haken, a)]
 
+    def kabel_messen(self) -> None:
+        """Kabel + Adapter an einem guten Ladegerät messen: kurzer Stufentest, die
+        Steigung der Kennlinie ist der Widerstand. Ein gutes Ladegerät hat selbst
+        kaum Widerstand - was es hat, wird dem Kabel zugerechnet, also eher zu
+        Gunsten des später geprüften Geräts."""
+        g = self.f.geraet
+        if not g or not g.kann_steuern or self.laeuft:
+            QMessageBox.information(self, "Kabel messen", "Erst den DL24 über USB verbinden.")
+            return
+        if not self.f._frage(
+                "Kabel messen",
+                "So wird der Widerstand von Kabel und Adapter gemessen:\n\n"
+                "1. Ein gutes Ladegerät nehmen (z. B. Original-Handyladegerät, mindestens 2 A).\n"
+                "2. Genau das Kabel und den Adapter, mit denen du prüfst, dazwischen stecken.\n"
+                "3. Auf „Ja“ drücken – die Messung dauert etwa 40 Sekunden.\n\n"
+                "Der Wert wird danach im Feld „Kabel + Adapter“ eingetragen. Ist alles angeschlossen?"):
+            return
+        e = nt.NetzteilEinstellung("Kabelmessung", 5.0, 2.0, stufen=4, stufe_s=10, dauertest=False,
+                                   abschalttest=False, fuehler=False)
+        self._kabel_messung = True
+        self.ablauf = nt.NetzteilAblauf(e, g, bei_ereignis=lambda a, t: self.f.b.ereignis.emit("nt:" + a, t))
+        self._nenn_v, self._geplant_s = 5.0, sum(x.dauer_s for x in self.ablauf.schritte) + 5
+        self.ergebnis.hide()
+        self.ergebnis_rahmen.hide()
+        self._grenzen_zeigen(None)
+        self._kurven([])
+        self._marken_zeichnen([], neu=True)
+        self.bild.setXRange(0, self._geplant_s / 60, padding=0.02)
+        self.schritt.setText("Kabel wird gemessen …")
+        self.f._zustand_zeigen()
+
+    def _kabel_fertig(self, ab) -> None:
+        r = ab.ergebnis
+        self.f._zustand_zeigen()
+        if ab.zustand != "fertig" or not r.widerstand_mohm:
+            self.schritt.setText("")
+            QMessageBox.warning(self, "Kabel messen", "Die Messung hat nicht geklappt: " + (r.grund or "kein Wert") +
+                                "\n\nIst das Ladegerät eingesteckt und schafft es 2 A?")
+            return
+        self.kabel.setValue(r.widerstand_mohm)
+        self.schritt.setText(f"Kabel + Adapter: {r.widerstand_mohm:.0f} mΩ – eingetragen")
+        log.info("Kabel gemessen: %.0f mΩ", r.widerstand_mohm)
+        QMessageBox.information(self, "Kabel messen",
+                                f"Kabel + Adapter: {r.widerstand_mohm:.0f} mΩ.\n\nDer Wert ist eingetragen und wird "
+                                "bei den nächsten Prüfungen herausgerechnet. Jetzt das zu prüfende Gerät anschließen.")
+
     def starten(self) -> None:
         g = self.f.geraet
         if not g or not g.kann_steuern:
@@ -771,12 +884,11 @@ class NetzteilReiter(QWidget):
         melden = lambda a, t: self.f.b.ereignis.emit("nt:" + a, t)
         if self.schnell.isChecked():
             self.ablauf = nt.TriggerAblauf(self.einstellung(), self._trigger_stufen(), g, bei_ereignis=melden)
-            self.grenze.hide()
+            self._grenzen_zeigen(None)
         else:
             e = plan[0]
             self.ablauf = nt.NetzteilAblauf(e, g, bei_ereignis=melden)
-            self.grenze.setValue(e.untere_v)
-            self.grenze.show()
+            self._grenzen_zeigen(e)
         self.ergebnis.hide()
         self.ergebnis_rahmen.hide()
         self._kurven([])
@@ -807,10 +919,31 @@ class NetzteilReiter(QWidget):
         if ab and ab.laeuft:
             ab.messwert(m)
 
+    def _grenzen_zeigen(self, e: nt.NetzteilEinstellung | None) -> None:
+        """Ampelbänder und gelbe Linie für diese Einstellung - oder alles weg."""
+        if e is None:
+            for b in self.baender:
+                b.hide()
+            self.grenze.hide()
+            self._kabel_ohm = 0.0
+            self.bild.setLabel("left", "Spannung (V)")
+            return
+        rot_u, gelb_u, gelb_o, rot_o = e.grenzen()
+        weit = e.nenn_v * 10 + 50
+        for b, (lo, hi) in zip(self.baender, ((-weit, rot_u), (rot_u, gelb_u), (gelb_u, gelb_o), (gelb_o, rot_o),
+                                              (rot_o, weit))):
+            b.setRegion((lo, hi))
+            b.show()
+        self.grenze.setValue(gelb_u)
+        self.grenze.show()
+        self._kabel_ohm = e.kabel_mohm / 1000
+        self.bild.setLabel("left", "Spannung an der Buchse (V)" if e.kabel_mohm else "Spannung (V)")
+
     def _kurven(self, punkte: list) -> None:
         """Alle Streifen aus den Punkten (s, V, A, °C oder None)."""
         x = [p[0] / 60 for p in punkte]
-        v = [p[1] for p in punkte]
+        # Mit Kabelwert: die Spannung an der Buchse - nur so passt sie zur Ampel
+        v = [p[1] + p[2] * self._kabel_ohm for p in punkte]
         self.linie.setData(x, v)
         # Spannungsachse nach dem Betrieb, nicht nach dem Einbruch auf 0 beim Abschalten -
         # sonst werden die Stufen platt
@@ -910,16 +1043,22 @@ class NetzteilReiter(QWidget):
         self.schritt.setText("")
         self.schritt.setStyleSheet("font-weight: bold;")
         self.knopf_weiter.hide()
+        if getattr(self, "_kabel_messung", False):
+            self._kabel_messung = False
+            self._kabel_fertig(ab)
+            return
         if ab.ergebnis.dauer_s >= 5:
             self.f.speicher.netzteil_speichern(ab.einstellung, ab.ergebnis, ab.punkte, ab.start_wann)
             self.verlauf_laden()
-        self._zeigen(ab.einstellung.__dict__, ab.ergebnis.als_dict())
+        self._zeigen(ab.einstellung.__dict__, ab.ergebnis.als_dict(), ab.start_wann)
         self.ergebnis.show()
         self.ergebnis_rahmen.show()
         self.f._zustand_zeigen()
         from PySide6.QtWidgets import QApplication
         QApplication.beep()
         QApplication.alert(self.f)
+        if ab.ergebnis.dauer_s >= 5 and ab.zustand == "fertig":
+            self.ergebnis_fenster()            # das ganze Ergebnis gleich groß zeigen
 
     def verbindung_weg(self, grund: str) -> None:
         ab = self.ablauf
@@ -994,11 +1133,7 @@ class NetzteilReiter(QWidget):
         self._marken_zeichnen([], neu=True)
         self._marken_zeichnen(d["ergebnis"].get("marken") or [])
         e = d["einstellung"]
-        if e.get("trigger"):
-            self.grenze.hide()
-        else:
-            self.grenze.setValue(e["nenn_v"] * (1 - e["toleranz_proz"] / 100))
-            self.grenze.show()
+        self._grenzen_zeigen(None if e.get("trigger") else einstellung_aus(e))
         self._kurven(k)                     # Achse mit der Toleranzlinie neu setzen
         self.bild.enableAutoRange(x=True)
 
@@ -1007,7 +1142,9 @@ class NetzteilReiter(QWidget):
         self._angezeigt_wann = wann
         self.ergebnis.setText(ergebnis_html(e, r))
         self.knopf_pdf.setEnabled(True)
-        self.knopf_kabel.setEnabled(bool(r.get("widerstand_mohm")) and not e.get("kabel_mohm"))
+        self.knopf_gross.setEnabled(True)
+        # Gemessen wird immer der ganze Weg - auch mit eingetragenem Kabelwert
+        self.knopf_kabel.setEnabled(bool(r.get("widerstand_mohm")) and not e.get("trigger"))
 
     def _kabel_uebernehmen(self) -> None:
         e, r = getattr(self, "_angezeigt", ({}, {}))
@@ -1016,23 +1153,16 @@ class NetzteilReiter(QWidget):
             self.f.b.ereignis.emit("info", f"Kabelwert {r['widerstand_mohm']:.0f} mΩ übernommen – gilt ab der "
                                            "nächsten Prüfung")
 
-    def bericht_speichern(self, pfad: str | None = None) -> str | None:
-        """Ergebnis als PDF: Urteil, Werte, Kennlinie und das Diagramm."""
-        from PySide6.QtCore import QMarginsF, QUrl
-        from PySide6.QtGui import QPageLayout, QPageSize, QPdfWriter, QTextDocument
-        from PySide6.QtWidgets import QFileDialog
-        e, r = getattr(self, "_angezeigt", (None, None))
-        if not e:
-            return None
-        if not pfad:
-            name = "".join(c if c.isalnum() or c in " -_" else "_" for c in e.get("name") or "Netzteil").strip()
-            pfad, _ = QFileDialog.getSaveFileName(self, "Bericht speichern",
-                                                  f"Prüfbericht {name} {datetime.now():%Y-%m-%d}.pdf", "PDF (*.pdf)")
-            if not pfad:
-                return None
-        bild = self._hell_abfotografieren()
+    def _bericht_dokument(self, e: dict, r: dict):
+        """Derselbe Inhalt fürs Fenster und fürs PDF."""
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QTextDocument
         doc = QTextDocument()
-        doc.addResource(QTextDocument.ImageResource, QUrl("kurve.png"), bild)
+        doc.addResource(QTextDocument.ImageResource, QUrl("kurve.png"), self._hell_abfotografieren())
+        doc.setHtml(self._bericht_html(e, r))
+        return doc
+
+    def _bericht_html(self, e: dict, r: dict) -> str:
         breite = 640
         name = html.escape(e.get("name") or "Netzteil")
         if e.get("trigger"):
@@ -1044,15 +1174,62 @@ class NetzteilReiter(QWidget):
             angabe = f"{_kurz(e['nenn_v'])} V / {_kurz(round(strom, 2))} A ({_kurz(round(e['nenn_v'] * strom, 1))} W)"
         wann = datetime.fromtimestamp(self._angezeigt_wann) if getattr(self, "_angezeigt_wann", None) \
             else datetime.now()
-        doc.setHtml(
+        return (
             f"<h2>Prüfbericht: {name}</h2>"
             f"<p style='color:gray'>Angabe auf dem Gerät: {angabe} · geprüft am {wann:%d.%m.%Y um %H:%M} Uhr</p>"
             f"<h3>Kurz gesagt</h3>{kurz_html(e, r)}"
             f"<h3>Was wurde geprüft?</h3><p>{geprueft_text(e, r)}</p>"
             f"<p><img src='kurve.png' width='{breite}'></p>"
-            "<p style='color:gray'>Oben: Spannung (rote Linie = Untergrenze). Mitte: Strom und Leistung. "
+            "<p style='color:gray'>Oben: Spannung mit Farbbereichen – <span style='color:#2e9e4f'>grün</span> = "
+            "in Ordnung, <span style='color:#c77700'>gelb</span> = außerhalb der Vorgabe, aber nutzbar, "
+            "<span style='color:#d03b3b'>rot</span> = zu niedrig bzw. zu hoch. Mitte: Strom und Leistung. "
             "Unten: Temperatur, wenn ein Fühler angebracht war.</p>"
-            f"<h3>Messwerte für Fachleute</h3>{ergebnis_html(e, r, fach=True)}")
+            f"<h3>Messwerte für Fachleute</h3>{ergebnis_html(e, r, fach=True)}"
+            "<p style='color:gray'><b>Schwankung</b> = Unterschied zwischen höchstem und tiefstem Wert innerhalb "
+            "einer Stufe. Grün bis 1 %, gelb bis 3 %, rot darüber – das ist eine Einschätzung dieser Software, keine "
+            "Vorgabe der USB-Spezifikation. Der DL24 misst etwa zweimal pro Sekunde: Er erfasst langsame "
+            "Schwankungen, nicht das schnelle Brummen (Ripple) eines Netzteils – dafür braucht es ein "
+            "Oszilloskop.</p>")
+
+    def ergebnis_fenster(self) -> None:
+        """Das ganze Ergebnis in einem eigenen Fenster - unten im Reiter ist dafür zu wenig Platz."""
+        from PySide6.QtWidgets import QDialog, QDialogButtonBox, QTextBrowser
+        e, r = getattr(self, "_angezeigt", (None, None))
+        if not e:
+            return
+        dlg = QDialog(self)
+        dlg.setWindowFlag(Qt.Window)
+        dlg.setWindowTitle(f"Prüfergebnis: {e.get('name') or 'Netzteil'}")
+        dlg.resize(900, 1000)
+        lay = QVBoxLayout(dlg)
+        anzeige = QTextBrowser()
+        anzeige.setDocument(self._bericht_dokument(e, r))
+        anzeige.document().setParent(anzeige)
+        lay.addWidget(anzeige)
+        knoepfe = QDialogButtonBox(QDialogButtonBox.Close)
+        pdf = knoepfe.addButton("Bericht speichern (PDF) …", QDialogButtonBox.ActionRole)
+        pdf.clicked.connect(lambda: self.bericht_speichern())
+        knoepfe.rejected.connect(dlg.close)
+        lay.addWidget(knoepfe)
+        dlg.setAttribute(Qt.WA_DeleteOnClose)
+        self._fenster = dlg
+        dlg.show()
+
+    def bericht_speichern(self, pfad: str | None = None) -> str | None:
+        """Ergebnis als PDF: Urteil, Werte, Kennlinie und das Diagramm."""
+        from PySide6.QtCore import QMarginsF
+        from PySide6.QtGui import QPageLayout, QPageSize, QPdfWriter
+        from PySide6.QtWidgets import QFileDialog
+        e, r = getattr(self, "_angezeigt", (None, None))
+        if not e:
+            return None
+        if not pfad:
+            name = "".join(c if c.isalnum() or c in " -_" else "_" for c in e.get("name") or "Netzteil").strip()
+            pfad, _ = QFileDialog.getSaveFileName(self, "Bericht speichern",
+                                                  f"Prüfbericht {name} {datetime.now():%Y-%m-%d}.pdf", "PDF (*.pdf)")
+            if not pfad:
+                return None
+        doc = self._bericht_dokument(e, r)
         w = QPdfWriter(pfad)
         w.setPageSize(QPageSize(QPageSize.A4))
         w.setPageMargins(QMarginsF(15, 15, 15, 15), QPageLayout.Millimeter)

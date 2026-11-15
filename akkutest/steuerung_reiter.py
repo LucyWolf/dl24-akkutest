@@ -54,9 +54,11 @@ class SteuerungReiter(QWidget):
         knoepfe = QHBoxLayout()
         self.knopf_ein = QPushButton("▶  Start")
         self.knopf_ein.setStyleSheet("font-weight: bold; padding: 10px;")
+        self.knopf_ein.setMinimumHeight(self.knopf_ein.fontMetrics().height() + 22)   # nie gequetscht
         self.knopf_ein.clicked.connect(lambda: self.last(True))
         self.knopf_aus = QPushButton("■  Stop")
         self.knopf_aus.setStyleSheet("font-weight: bold; padding: 10px;")
+        self.knopf_aus.setMinimumHeight(self.knopf_aus.fontMetrics().height() + 22)   # nie gequetscht
         self.knopf_aus.clicked.connect(lambda: self.last(False))
         knoepfe.addWidget(self.knopf_ein)
         knoepfe.addWidget(self.knopf_aus)
@@ -83,10 +85,16 @@ class SteuerungReiter(QWidget):
         self.anz = {}
         for i, (k, t) in enumerate([("u", "Spannung"), ("i", "Strom"), ("p", "Leistung"), ("r", "Widerstand"),
                                     ("mah", "Kapazität (Gerät)"), ("wh", "Energie (Gerät)"),
-                                    ("t", "Temperatur Gerät"), ("tf", "Temperatur Fühler")]):
+                                    ("t", "Temperatur Kühler (MOS)"), ("tf", "Temperatur Fühler"),
+                                    ("tc", "Temperatur CPU")]):
             self.anz[k] = Anzeige(t)
             raster.addWidget(self.anz[k], i // 4, i % 4)
         rechts.addLayout(raster)
+        self.temp_roh = QLabel()
+        self.temp_roh.setStyleSheet(gedaempft())
+        self.temp_roh.setToolTip("So schickt das Gerät die drei Temperaturen - zum Prüfen, welcher Wert welcher "
+                                 "Fühler ist")
+        rechts.addWidget(self.temp_roh)
         rechts.addStretch(1)
         h.addLayout(rechts, 1)
 
@@ -120,6 +128,10 @@ class SteuerungReiter(QWidget):
         a["wh"].setzen(zahl(m.wh_geraet, 3, "Wh") if m.wh_geraet is not None else "–")
         a["t"].setzen(zahl(m.temperatur, 0, "°C") if m.temperatur is not None else "–")
         a["tf"].setzen(zahl(m.temp_fuehler, 1, "°C") if m.temp_fuehler is not None else "kein Fühler")
+        a["tc"].setzen(zahl(m.temp_cpu, 1, "°C") if m.temp_cpu is not None else "–")
+        if m.temp_roh:
+            self.temp_roh.setText("Rohwerte vom Gerät (Byte 32/36/40): " +
+                                  " · ".join(zahl(x, 3, "°C") for x in m.temp_roh))
         self.zustand.setText("<span style='color:#2e9e4f'>● an</span>" if m.an
                              else "<span style='color:gray'>○ aus</span>")
 
