@@ -240,6 +240,9 @@ def test_netzteil_reiter():
     f.nt.mit_dauer.setChecked(False)
     f.nt.mit_abschalt.setChecked(True)
     f.nt.max_proz.setValue(150)
+    assert not f.nt.mit_fuehler.isChecked() and not f.nt.temp_grenze.isEnabled()   # Fühler standardmäßig aus
+    f.nt.mit_fuehler.setChecked(True)
+    assert f.nt.temp_grenze.isEnabled()
     assert "4,75" in f.nt.angabe_hinweis.text()
     f.nt.starten()
     assert f.nt.laeuft and not f.knopf_start.isEnabled()      # kein Akkutest nebenher

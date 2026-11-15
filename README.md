@@ -92,8 +92,10 @@ verbunden (oder ein PX100).
 
 1. Den Ausgang des Ladegeräts an den Eingang des DL24 anschließen. Bei USB über
    einen USB-Adapter mit Klemmen.
-2. Für die Temperatur den **Fühler des DL24** mit Klebeband ans Gehäuse des
-   Ladegeräts kleben. Ohne Fühler fällt die Temperatur weg.
+2. Wer die Temperatur messen will: den **Fühler des DL24** mit Klebeband ans
+   Gehäuse des Ladegeräts kleben und bei den Tests „Temperaturfühler“
+   ankreuzen. Dann wird bei der eingestellten Grenze abgebrochen. Ohne Haken
+   bleibt die Temperatur außen vor.
 3. Reiter **Ladegeräte & Netzteile**: eine Vorlage wählen oder Spannung und
    Strom **oder** Watt vom Typenschild eintragen – das andere rechnet das
    Programm aus. Steht nichts drauf: „Strom/Leistung steht nicht drauf“
@@ -113,9 +115,16 @@ verbunden (oder ein PX100).
 
 | Urteil | Bedeutung |
 |---|---|
-| ✔ Empfehlenswert | Liefert den angegebenen Strom, die Spannung bleibt in der Toleranz. |
-| ⚠ Eingeschränkt verwendbar | Liefert den Strom, die Spannung sackt aber unter die Toleranz (bei USB unter 4,75 V, über 4,4 V). Zum Laden meist in Ordnung, für empfindliche Geräte nicht. |
-| ✘ Nicht verwenden | Schaltet vor dem angegebenen Strom ab, die Spannung fällt unter den Mindestwert (USB 4,4 V), zu hohe Spannung im Leerlauf (USB über 5,5 V) oder wird zu heiß. |
+| ✔ Empfehlenswert | Liefert den angegebenen Strom, die Spannung bleibt im vorgegebenen Bereich. |
+| ⚠ Eingeschränkt verwendbar | Liefert den Strom, aber die Spannung an der Buchse liegt unter 4,75 V (über 4,40 V) oder im Leerlauf über 5,25 V – entspricht nicht den Vorgaben der USB-Spezifikation. Zum Laden meist in Ordnung, für empfindliche Geräte nicht. |
+| ✘ Nicht verwenden | Schaltet vor dem angegebenen Strom ab, an der Buchse unter 4,40 V, im Leerlauf über 5,5 V (kann Geräte beschädigen) oder wird zu heiß. |
+| ? Noch nicht entscheidbar | Am Kabelende kam zu wenig an, aber das Kabel ist nicht herausgerechnet – ob es am Gerät oder am Kabel liegt, ist offen. |
+
+**Grundlage bei USB:** die USB-Spezifikation 2.0, Abschnitt 7.2.2 (auch als
+Norm EN 62680-2-1 veröffentlicht): An einem Port mit eigener Stromversorgung
+4,75–5,25 V, gemessen an der Buchse; 4,40 V nur bei Schwachstrom-Ports. Das ist
+eine Vorgabe der Industrie, keine gesetzliche. Bei anderen Netzteilen gilt die
+eingestellte Toleranz um die Angabe auf dem Typenschild.
 
 Getrennt davon steht da, ob es **schafft, was es verspricht**, also den
 angegebenen Strom ohne Abschalten liefert.

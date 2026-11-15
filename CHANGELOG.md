@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.22 – 15.11.2026
+
+- **Bewertung bei USB nach der USB-Spezifikation** (USB 2.0 §7.2.2, auch
+  EN 62680-2-1): 4,75–5,25 V an der Buchse. Liegt die Spannung nachweislich
+  darunter, steht im Bericht, dass das Gerät **nicht den Vorgaben für die
+  Spannung entspricht**. Die bisherige Grenze 4,4 V galt in der Spezifikation
+  nur für Schwachstrom-Ports und war für Netzteile zu großzügig.
+- **Ohne Kabelwert kein falsches Urteil:** Kommt am Kabelende zu wenig an, heißt
+  es „Noch nicht entscheidbar“ – mit Anleitung, wie man es klärt. Vorher hieß es
+  „Nicht verwenden“, auch wenn es am Kabel lag.
+- Im Bericht steht „USB-Spezifikation“ statt „Norm“ – es ist keine gesetzliche
+  Vorgabe.
+- **Temperaturfühler wählbar:** Haken „Temperaturfühler“ bei den Tests,
+  standardmäßig aus. Ohne Haken wird die Temperatur nicht ausgewertet.
+
 ## 1.0.21 – 15.11.2026
 
 - **Bericht für alle verständlich:** oben „Kurz gesagt“ mit dem Urteil in

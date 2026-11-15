@@ -27,7 +27,8 @@ def _kurz(x: float) -> str:
 
 URTEILE = {"gut": ("✔ Empfehlenswert", "#2e9e4f"),
            "eingeschraenkt": ("⚠ Eingeschränkt verwendbar", "#c77700"),
-           "nicht": ("✘ Nicht verwenden", "#d03b3b")}
+           "nicht": ("✘ Nicht verwenden", "#d03b3b"),
+           "offen": ("? Noch nicht entscheidbar – Kabel nicht herausgerechnet", "#7a7a7a")}
 
 
 def urteil_html(r: dict, fach: bool = False) -> list[str]:
@@ -173,7 +174,7 @@ def ergebnis_html(e: dict, r: dict, fach: bool = False) -> str:
         if r.get("temp_start") is not None:
             t += f" (Start {zahl(r['temp_start'], 0)} °C, +{r['temp_max'] - r['temp_start']:.0f} K)"
         tab.append(("Temperatur", t))
-    else:
+    elif e.get("fuehler", True):
         tab.append(("Temperatur", "– (kein Fühler am DL24)"))
     tab.append(("Dauer", dauer_text(r.get("dauer_s", 0))))
     tab.append(("Ende", html.escape(r.get("grund", ""))))
@@ -379,18 +380,24 @@ class NetzteilReiter(QWidget):
         self.warnung_ende.setStyleSheet("color:#d03b3b; font-weight:bold;")
         self.warnung_ende.hide()
         f.addWidget(self.warnung_ende, 3, 0, 1, 3)
-        f.addWidget(QLabel("Temperaturgrenze:"), 4, 0)
+        self.mit_fuehler = QCheckBox("Temperaturfühler, Grenze:")
+        self.mit_fuehler.setToolTip("Den externen Fühler des DL24 auswerten - abschalten bei der Grenze")
+        self.mit_fuehler.toggled.connect(self._fuehler_umschalten)
+        f.addWidget(self.mit_fuehler, 4, 0)
         self.temp_grenze = QSpinBox()
         self.temp_grenze.setRange(30, 120)
         self.temp_grenze.setValue(70)
         self.temp_grenze.setSuffix(" °C")
         self.temp_grenze.setToolTip("Gilt für den Temperaturfühler des DL24 - am Netzteil festkleben")
         f.addWidget(self.temp_grenze, 4, 1)
-        hinweis = QLabel("Temperatur: den Fühler des DL24 mit Klebeband ans Gehäuse des Netzteils kleben. "
-                         "Ohne Fühler wird sie nicht gemessen.")
+        hinweis = QLabel("Den Fühler des DL24 mit Klebeband ans Gehäuse des Netzteils kleben. Bei der Grenze "
+                         "wird abgebrochen.")
         hinweis.setWordWrap(True)
         hinweis.setStyleSheet(gedaempft())
         f.addWidget(hinweis, 5, 0, 1, 3)
+        self.fuehler_hinweis = hinweis
+        hinweis.hide()
+        self.temp_grenze.setEnabled(False)
         self.dauer = QLabel()
         f.addWidget(self.dauer, 6, 0, 1, 3)
         knoepfe = QHBoxLayout()
@@ -604,6 +611,10 @@ class NetzteilReiter(QWidget):
         self.max_proz.setEnabled(not an and not self.laeuft)
         self._dauer_zeigen()
 
+    def _fuehler_umschalten(self, an: bool) -> None:
+        self.temp_grenze.setEnabled(an and not self.laeuft)
+        self.fuehler_hinweis.setVisible(an)
+
     def _felder_sperren(self) -> None:
         frei = not self.laeuft and not self.schnell.isChecked()
         for w in (self.vorlage, self.nenn_v, self.unbekannt):
@@ -633,6 +644,7 @@ class NetzteilReiter(QWidget):
             dauertest=self.mit_dauer.isChecked(), dauer_proz=self.dauer_proz.value(),
             dauer_min=self.dauer_min.value(), abschalttest=self.mit_abschalt.isChecked(),
             max_proz=self.max_proz.value(), temp_grenze=self.temp_grenze.value(),
+            fuehler=self.mit_fuehler.isChecked(),
             bis_ende=self.bis_ende.isChecked(), kabel_mohm=self.kabel.value())
 
     def _unbekannt_umschalten(self, an: bool) -> None:
@@ -724,9 +736,10 @@ class NetzteilReiter(QWidget):
         self._felder_sperren()
         self._freigeben()
         self.max_proz.setEnabled(not self.laeuft and not self.bis_ende.isChecked())
+        self.temp_grenze.setEnabled(not self.laeuft and self.mit_fuehler.isChecked())
         for w in (self.name, self.toleranz,
                   self.mit_stufen, self.stufen, self.stufe_s, self.mit_dauer, self.dauer_proz,
-                  self.dauer_min, self.mit_abschalt, self.temp_grenze, self.kabel, self.bis_ende):
+                  self.dauer_min, self.mit_abschalt, self.mit_fuehler, self.kabel, self.bis_ende):
             w.setEnabled(not self.laeuft)
         if not g:
             self.steuer_hinweis.setText("Erst verbinden.")
@@ -856,7 +869,10 @@ class NetzteilReiter(QWidget):
         self.anz["u"].setzen(zahl(m.spannung, stellen, "V"))
         self.anz["i"].setzen(zahl(m.strom, 3, "A"))
         self.anz["p"].setzen(zahl(m.leistung, 2, "W"))
-        self.anz["t"].setzen(zahl(m.temp_fuehler, 1, "°C") if m.temp_fuehler is not None else "kein Fühler")
+        if not self.mit_fuehler.isChecked():
+            self.anz["t"].setzen("aus")
+        else:
+            self.anz["t"].setzen(zahl(m.temp_fuehler, 1, "°C") if m.temp_fuehler is not None else "kein Fühler")
         ab = self.ablauf
         teil = ab.teil if isinstance(ab, nt.TriggerAblauf) else ab
         if ab and ab.laeuft and isinstance(teil, nt.NetzteilAblauf):

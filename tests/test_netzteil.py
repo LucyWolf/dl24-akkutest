@@ -166,6 +166,11 @@ def test_unbekannter_strom_ohne_trigger():
     print("unbekannt:", r.grund, nt.bestleistung(r.als_dict()))
     assert r.haelt is None and r.abschalt_a == 2.75
     assert abs(nt.bestleistung(r.als_dict())[1] - 2.5) < 1e-6
+    # Fühler abgewählt: keine Temperatur, keine Grenze
+    q = SimNetzteil(12.0, innen_mohm=50, abschalt_a=9.0, heiz_c_je_w=3.0)
+    e = nt.NetzteilEinstellung("Heiß", 12.0, 2.0, stufentest=False, dauer_min=20, temp_grenze=50, fuehler=False)
+    r = durchspielen(q, e, tempo=600)[0].ergebnis
+    assert r.temp_max is None and not r.zu_heiss and r.urteil == "gut", (r.temp_max, r.grund)
 
 
 def test_urteil_mit_und_ohne_kabel():
@@ -175,22 +180,30 @@ def test_urteil_mit_und_ohne_kabel():
         e = nt.NetzteilEinstellung("Hub", 5.0, 2.0, stufen=5, stufe_s=10, dauertest=False, kabel_mohm=kabel)
         return durchspielen(q, e)[0].ergebnis
     ohne = hub(0)
-    print("Hub ohne Kabelwert:", ohne.urteil, ohne.widerstand_mohm, ohne.gruende)
-    assert ohne.urteil == "nicht" and ohne.verspricht is True
+    print("Hub ohne Kabelwert:", ohne.urteil, ohne.widerstand_mohm, ohne.laien)
+    # am Kabelende zu wenig - aber ohne Kabelwert nicht entscheidbar
+    assert ohne.urteil == "offen" and ohne.verspricht is True and not ohne.spez_verletzt
     assert 320 <= ohne.widerstand_mohm <= 360
-    assert any("Kabel" in g for g in ohne.gruende)
+    assert any("nicht sagen" in t for t in ohne.laien) and any("Kabelwert" in t for t in ohne.laien)
     mit = hub(300)                          # Kabel + Adapter herausgerechnet
     print("Hub mit Kabelwert:", mit.urteil, mit.gruende, mit.stufen[-1].buchse_v)
     assert mit.urteil == "gut" and mit.stufen[-1].buchse_v > 4.9
-    knapp = hub(150)                        # Buchse 4,67 V: unter der Toleranz, über 4,4 V
-    assert knapp.urteil == "eingeschraenkt", (knapp.urteil, knapp.gruende)
+    knapp = hub(150)                        # Buchse 4,67 V: unter 4,75 V, über 4,40 V
+    assert knapp.urteil == "eingeschraenkt" and knapp.spez_verletzt, (knapp.urteil, knapp.gruende)
+    assert any("entspricht damit nicht den Vorgaben" in t for t in knapp.laien), knapp.laien
+    assert any("§7.2.2" in g for g in knapp.gruende)
+    tief = SimNetzteil(5.0, innen_mohm=600, abschalt_a=9)
+    e = nt.NetzteilEinstellung("Mies", 5.0, 2.0, stufen=2, stufe_s=10, dauertest=False, kabel_mohm=100)
+    mies = durchspielen(tief, e)[0].ergebnis      # Buchse 3,85 + 0,2 = 4,05 V
+    assert mies.urteil == "nicht" and mies.spez_verletzt
 
 
 def test_zu_hohe_spannung():
     q = SimNetzteil(5.6, innen_mohm=50, abschalt_a=9)
     e = nt.NetzteilEinstellung("Billig", 5.0, 1.0, stufen=2, stufe_s=10, dauertest=False, toleranz_proz=20)
     r = durchspielen(q, e)[0].ergebnis
-    assert r.urteil == "nicht" and "Leerlauf" in r.gruende[0], r.gruende
+    assert r.urteil == "nicht" and "Leerlauf" in r.gruende[0] and r.spez_verletzt, r.gruende
+    assert any("höchstens 5,25 Volt" in t and "beschädigen" in t for t in r.laien), r.laien
 
 
 def test_maximum_suchen():
