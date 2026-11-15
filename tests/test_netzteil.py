@@ -91,6 +91,83 @@ def test_ohne_spannung_und_grenzen():
     assert nt.NetzteilEinstellung("x", 5, 2, stufentest=False, dauertest=False).pruefen()
 
 
+def trigger_durchspielen(q, basis, stufen, kann, tempo=200, frist=90):
+    """Spielt den Menschen am Trigger-Adapter: stellt die verlangte Spannung ein,
+    wenn das Ladegerät sie kann - sonst bleibt es bei der vorigen."""
+    nt.TRIGGER_WARTEN_S = 20
+    v = SimulatorVerbindung(protokoll="hid", akku=q, tempo=tempo, bericht_s=0.02)
+    v.oeffnen()
+    g = Geraet(v, intervall=0.02)
+    assert g.erkennen(warten=0.2) == "hid"
+    fertig = threading.Event()
+    ereignisse = []
+
+    def melden(art, text):
+        ereignisse.append((art, text))
+        if art == "umschalten":
+            ziel = float(text.split("jetzt ")[1].split(" V")[0].replace(",", "."))
+            if ziel in kann:
+                q.nenn_v = ziel
+        if art == "fertig":
+            fertig.set()
+
+    ab = nt.TriggerAblauf(basis, stufen, g, bei_ereignis=melden)
+    g.bei_messwert = ab.messwert
+    g.starten()
+    assert fertig.wait(frist), f"nicht fertig: {ab.zustand} {ereignisse[-3:]}"
+    for _ in range(100):
+        if not v.geraet.an:
+            break
+        time.sleep(0.01)
+    g.trennen()
+    assert not v.geraet.an and not v.geraet.update_modus
+    return ab, ereignisse
+
+
+def test_schnellladen_mit_trigger():
+    q = SimNetzteil(5.0, innen_mohm=100, abschalt_a=3.3)
+    basis = nt.NetzteilEinstellung("PD-Lader", 5.0, 0, stufen=3, stufe_s=10, dauertest=False)
+    ab, ev = trigger_durchspielen(q, basis, [(5.0, 3.0), (9.0, 0), (12.0, 0), (15.0, 0)], kann={9.0, 12.0})
+    r = ab.ergebnis
+    print("PD:", r.grund, [(t["einstellung"]["nenn_v"], t["ergebnis"]["haelt"], nt.bestleistung(t["ergebnis"]))
+                           for t in r.teile], r.nicht)
+    assert [t["einstellung"]["nenn_v"] for t in r.teile] == [5.0, 9.0, 12.0]
+    assert r.teile[0]["ergebnis"]["haelt"] is True                   # 5 V / 3 A angegeben und gehalten
+    neun = r.teile[1]
+    assert neun["einstellung"]["unbekannt"] and neun["ergebnis"]["abschalt_a"] == 3.5
+    w, a = nt.bestleistung(neun["ergebnis"])
+    assert 27 < w < 30 and a == 3.25, (w, a)                         # 9 V × 3,25 A
+    assert r.nicht == [{"volt": 15.0, "gemessen": 12.05, "grund": "kam nicht"}], r.nicht
+    assert r.haelt is False and "nicht unterstützt: 15 V" in r.grund
+    assert sum(1 for a, _ in ev if a == "umschalten") == 4
+    from akkutest import speicher
+    import json
+    json.dumps(r.als_dict())                                          # speicherbar
+
+
+def test_kein_schnellladen():
+    q = SimNetzteil(5.0, innen_mohm=100, abschalt_a=2.2)
+    basis = nt.NetzteilEinstellung("Alter Lader", 5.0, 0, dauertest=False)
+    ab, _ = trigger_durchspielen(q, basis, [(5.0, 0), (9.0, 0)], kann=set())
+    r = ab.ergebnis
+    print("ohne PD:", r.grund, r.nicht)
+    assert [t["einstellung"]["nenn_v"] for t in r.teile] == [5.0]
+    assert r.nicht and r.nicht[0]["volt"] == 9.0 and r.nicht[0]["grund"] == "kam nicht"
+    w, _ = nt.bestleistung(r.teile[0]["ergebnis"])
+    assert 9.5 < w < 11.5, w                                          # 5 V × 2,0–2,2 A
+
+
+def test_unbekannter_strom_ohne_trigger():
+    q = SimNetzteil(12.0, innen_mohm=60, abschalt_a=2.7)
+    e = nt.ermitteln(nt.NetzteilEinstellung("Steckernetzteil", 12.0, 0), usb=False)
+    assert e.unbekannt and e.nenn_a == 10.0 and not e.dauertest
+    ab, _ = durchspielen(q, e, tempo=300)
+    r = ab.ergebnis
+    print("unbekannt:", r.grund, nt.bestleistung(r.als_dict()))
+    assert r.haelt is None and r.abschalt_a == 2.75
+    assert abs(nt.bestleistung(r.als_dict())[1] - 2.5) < 1e-6
+
+
 if __name__ == "__main__":
     for n, f in list(globals().items()):
         if n.startswith("test_"):

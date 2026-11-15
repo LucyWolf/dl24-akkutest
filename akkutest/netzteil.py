@@ -61,6 +61,8 @@ class NetzteilEinstellung:
     abschalttest: bool = False
     max_proz: float = 130.0
     temp_grenze: float = 70.0
+    trigger: list = field(default_factory=list)   # [[V, A], …] bei Schnellladegeräten
+    unbekannt: bool = False   # Strom unbekannt: Leistung ermitteln statt Angabe prüfen
 
     @property
     def strom_a(self) -> float:
@@ -98,6 +100,24 @@ class NetzteilEinstellung:
             return (f"Der Test bräuchte bis zu {w:.0f} W ({self.hoechster_strom():.2f} A × {self.nenn_v:g} V). "
                     f"Der DL24 schafft {DL24_MAX_W:.0f} W - Grenze oder Dauerstrom senken.")
         return None
+
+
+SUCH_SCHRITT_A = 0.25
+SUCH_STUFE_S = 10.0
+
+
+def such_grenze(volt: float, usb: bool) -> float:
+    """Bis wohin beim Ermitteln gesteigert wird: USB-C-Kabel tragen 5 A, der DL24 150 W."""
+    return round(min(5.0 if usb else 10.0, DL24_MAX_W / volt * 0.98), 2)
+
+
+def ermitteln(e: NetzteilEinstellung, usb: bool) -> NetzteilEinstellung:
+    """Aus einer Einstellung ohne Stromangabe eine Suche machen: in kleinen
+    Stufen hoch, bis es abschaltet oder einbricht."""
+    grenze = such_grenze(e.nenn_v, usb)
+    return NetzteilEinstellung(**{**e.__dict__, "nenn_a": grenze, "nenn_w": 0.0, "unbekannt": True,
+                                  "stufentest": True, "stufen": max(2, round(grenze / SUCH_SCHRITT_A)),
+                                  "stufe_s": SUCH_STUFE_S, "dauertest": False, "abschalttest": False})
 
 
 @dataclass
@@ -321,19 +341,23 @@ class NetzteilAblauf:
         nenn_erreicht = any(abs(x.soll_a - e.strom_a) < 1e-6 for x in r.stufen) or (
             r.dauer is not None and r.dauer.soll_a >= e.strom_a - 1e-6)
         haelt: bool | None = None
-        if r.abschalt_a is not None and r.abschalt_a <= e.strom_a + 1e-6:
+        if e.unbekannt:
+            pass                             # nichts angegeben, nichts zu halten
+        elif r.abschalt_a is not None and r.abschalt_a <= e.strom_a + 1e-6:
             haelt = False                    # vor dem Nennstrom ausgefallen
         elif any(not x.ok for x in bis_nenn) or (r.dauer is not None and not r.dauer.ok):
             haelt = False                    # Spannung unter der Toleranz
         elif nenn_erreicht and haelt_moeglich:
             haelt = True
         r.haelt = haelt
+        if not grund and e.unbekannt:
+            grund = f"Bis {r.max_getestet_a:.2f} A ohne Abschaltung - Grenze der Suche"
         if not grund:
             grund = "Alle Schritte durchlaufen"
             if e.abschalttest and r.abschalt_a is None:
                 grund = (f"Bis {r.max_getestet_a:.2f} A ({r.max_getestet_a / e.strom_a * 100:.0f} %) "
                          "keine Abschaltung - Grenze erreicht")
-        self._beenden(grund, haelt is not None)
+        self._beenden(grund, haelt is not None or e.unbekannt)
 
     def _last_aus(self) -> None:
         try:
@@ -348,3 +372,190 @@ class NetzteilAblauf:
         log.info("Netzteiltest beendet: %s", grund)
         self.bei_ereignis("fertig", grund)
 
+
+
+# ----------------------------------------------------------------------
+# Schnellladegeräte (USB-PD / QC) über einen Trigger-Adapter
+# ----------------------------------------------------------------------
+TRIGGER_SPANNUNGEN = [5.0, 9.0, 12.0, 15.0, 20.0]
+TRIGGER_TREFFER = 0.08        # ±8 % um die gewünschte Spannung gilt als "kommt an"
+TRIGGER_WARTEN_S = 120.0      # so lange auf das Umschalten warten, dann "nicht unterstützt"
+
+
+@dataclass
+class TriggerErgebnis:
+    teile: list[dict] = field(default_factory=list)    # je Spannung {"einstellung", "ergebnis"}
+    nicht: list[dict] = field(default_factory=list)    # {"volt", "gemessen", "grund"}
+    dauer_s: float = 0.0
+    grund: str = ""
+    vollstaendig: bool = False
+    haelt: bool | None = None
+
+    def als_dict(self) -> dict:
+        return dict(self.__dict__)
+
+
+def trigger_einstellung(basis: NetzteilEinstellung, volt: float, ampere: float) -> NetzteilEinstellung:
+    e = NetzteilEinstellung(**{**basis.__dict__, "name": f"{basis.name} – {volt:g} V",
+                               "nenn_v": volt, "nenn_a": ampere, "nenn_w": 0.0, "trigger": []})
+    return ermitteln(e, usb=True) if ampere <= 0 else e
+
+
+def bestleistung(r: dict) -> tuple[float, float] | None:
+    """Höchste Leistung (W, A) einer Stufe, bei der die Spannung noch in der Toleranz lag."""
+    ok = [s for s in r.get("stufen") or [] if s["ok"]]
+    if not ok:
+        return None
+    s = max(ok, key=lambda s: s["spannung"] * s["strom"])
+    return s["spannung"] * s["strom"], s["strom"]
+
+
+class TriggerAblauf:
+    """Prüft nacheinander jede gewählte Spannung. Umschalten muss der Mensch am
+    Adapter - die App sagt, welche, und wartet, bis sie ankommt."""
+
+    def __init__(self, basis: NetzteilEinstellung, stufen: list[tuple[float, float]], geraet: Geraet,
+                 bei_ereignis: Callable[[str, str], None] = lambda a, t: None) -> None:
+        self.basis = basis
+        self.stufen = sorted(stufen)
+        self.geraet = geraet
+        self.bei_ereignis = bei_ereignis
+        hoch = self.stufen[-1]
+        self.einstellung = NetzteilEinstellung(**{**basis.__dict__, "nenn_v": hoch[0],
+                                                  "nenn_a": hoch[1] or such_grenze(hoch[0], True),
+                                                  "nenn_w": 0.0, "unbekannt": hoch[1] <= 0})
+        self.einstellung.trigger = [list(s) for s in self.stufen]
+        self.ergebnis = TriggerErgebnis()
+        self.punkte: list[tuple] = []
+        self.start_wann = time.time()
+        self.zustand = "umschalten"
+        self.steuerbar = bool(geraet and geraet.kann_steuern)
+        self.i = -1
+        self.teil: NetzteilAblauf | None = None
+        self._t0: float | None = None
+        self._warten_seit: float | None = None
+        self._treffer = 0
+        self._ueberspringen = False
+        self._weiter()
+
+    @property
+    def laeuft(self) -> bool:
+        return self.zustand in ("umschalten", "laeuft")
+
+    @property
+    def ziel(self) -> tuple[float, float] | None:
+        return self.stufen[self.i] if 0 <= self.i < len(self.stufen) else None
+
+    def einstellung_fuer(self, volt: float, ampere: float) -> NetzteilEinstellung:
+        return trigger_einstellung(self.basis, volt, ampere)
+
+    def _weiter(self) -> None:
+        self.i += 1
+        self.teil = None
+        if self.ziel is None:
+            self._fertig()
+            return
+        self.zustand = "umschalten"
+        self._warten_seit = None
+        self._treffer = 0
+        self._ueberspringen = False
+        try:
+            self.geraet.last(False)
+        except Exception:
+            log.exception("Last aus")
+        v = self.ziel[0]
+        self.bei_ereignis("umschalten", f"Am Trigger-Adapter jetzt {v:g} V einstellen – "
+                                        f"die Prüfung beginnt, sobald {v:g} V anliegen.")
+
+    def ueberspringen(self) -> None:
+        self._ueberspringen = True
+
+    def messwert(self, m: Messwert) -> None:
+        if not self.laeuft:
+            return
+        if self._t0 is None:
+            self._t0 = m.zeit
+        self.ergebnis.dauer_s = m.zeit - self._t0
+        self.punkte.append((round(m.zeit - self._t0, 1), m.spannung, m.strom, m.temp_fuehler))
+        try:
+            if self.zustand == "umschalten":
+                self._umschalten(m)
+            elif self.teil is not None:
+                self.teil.messwert(m)
+        except Exception as ex:
+            log.exception("Triggerprüfung")
+            self.abbrechen(f"Fehler: {ex}")
+
+    def _umschalten(self, m: Messwert) -> None:
+        v, a = self.ziel
+        if self._warten_seit is None:
+            self._warten_seit = m.zeit
+        if m.an or m.strom > STROM_AUS:
+            self.geraet.last(False)
+            return
+        if abs(m.spannung - v) <= v * TRIGGER_TREFFER:
+            self._treffer += 1
+        else:
+            self._treffer = 0
+        if self._treffer >= 3:
+            self.zustand = "laeuft"
+            e = self.einstellung_fuer(v, a)
+            self.teil = NetzteilAblauf(e, self.geraet, bei_ereignis=self._teil_ereignis)
+            self.bei_ereignis("info", f"{v:g} V liegen an – Prüfung läuft")
+            return
+        if self._ueberspringen or m.zeit - self._warten_seit >= TRIGGER_WARTEN_S:
+            grund = "übersprungen" if self._ueberspringen else "kam nicht"
+            self.ergebnis.nicht.append({"volt": v, "gemessen": round(m.spannung, 2), "grund": grund})
+            self.bei_ereignis("info", f"{v:g} V {grund} (gemessen {m.spannung:.2f} V)")
+            self._weiter()
+
+    def _teil_ereignis(self, art: str, text: str) -> None:
+        v = self.ziel[0] if self.ziel else 0
+        if art != "fertig":
+            self.bei_ereignis(art, f"{v:g} V – {text}")
+            return
+        t = self.teil
+        self.ergebnis.teile.append({"einstellung": dict(t.einstellung.__dict__), "ergebnis": t.ergebnis.als_dict()})
+        if t.zustand == "abgebrochen" and t.ergebnis.leerlauf_v is not None:
+            # von Hand oder Fehler: alles beenden
+            self.zustand = "abgebrochen"
+            self._fertig(t.ergebnis.grund, zustand="abgebrochen")
+            return
+        self._weiter()
+
+    def abbrechen(self, grund: str = "von Hand abgebrochen") -> None:
+        if not self.laeuft:
+            return
+        if self.teil is not None and self.teil.laeuft:
+            self.teil.bei_ereignis = lambda a, t: None
+            self.teil.abbrechen()
+            self.ergebnis.teile.append({"einstellung": dict(self.teil.einstellung.__dict__),
+                                        "ergebnis": self.teil.ergebnis.als_dict()})
+        else:
+            try:
+                self.geraet.last(False)
+            except Exception:
+                log.exception("Last aus")
+        self._fertig(grund, zustand="abgebrochen")
+
+    def _fertig(self, grund: str = "", zustand: str = "fertig") -> None:
+        r = self.ergebnis
+        # Nur Spannungen mit Stromangabe haben etwas zu halten
+        urteile = [t["ergebnis"]["haelt"] for t in r.teile if not t["einstellung"].get("unbekannt")]
+        angegeben = [a for _, a in self.stufen if a > 0]
+        if any(u is False for u in urteile):
+            r.haelt = False
+        elif any(n["grund"] == "kam nicht" for n in r.nicht) and zustand == "fertig":
+            r.haelt = False                  # eine gewählte Spannung kommt gar nicht
+        elif urteile and all(u is True for u in urteile) and len(urteile) == len(angegeben) and not r.nicht:
+            r.haelt = True
+        if not grund:
+            da = [f"{t['einstellung']['nenn_v']:g} V" for t in r.teile]
+            grund = "Geprüft: " + (", ".join(da) if da else "keine Spannung")
+            if r.nicht:
+                grund += "; nicht unterstützt: " + ", ".join(f"{n['volt']:g} V" for n in r.nicht)
+        r.grund = grund
+        r.vollstaendig = zustand == "fertig"
+        self.zustand = zustand
+        log.info("Triggerprüfung beendet: %s", grund)
+        self.bei_ereignis("fertig", grund)

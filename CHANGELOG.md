@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.17 – 15.11.2026
+
+- **Schnellladegeräte (USB-PD / QC / Fast Charging)** prüfen, mit einem
+  Trigger-Adapter zwischen Ladegerät und DL24: Spannungen 5/9/12/15/20 V
+  ankreuzen, je Spannung den Strom vom Aufdruck eintragen. Das Programm sagt an,
+  welche Spannung am Adapter einzustellen ist, und prüft jede einzeln. Ergebnis:
+  welche Spannungen das Ladegerät kann, was es jeweils liefert, ob es die
+  Angaben hält – oder ob es gar kein Schnellladen kann.
+- **Strom unbekannt?** Dann ermittelt das Programm, wie viel das Gerät liefert
+  (in 0,25-A-Schritten bis zur Abschaltung, höchstens 5 A bei USB bzw. 150 W).
+- Lange Ergebnisse lassen sich rollen statt abgeschnitten zu werden.
+
 ## 1.0.16 – 15.11.2026
 
 - **Neu: Reiter „Steuerung“** – den DL24 von Hand bedienen wie in der

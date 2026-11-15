@@ -287,6 +287,50 @@ def test_steuerung_von_hand():
     f.close()
 
 
+def test_schnellladen_im_fenster():
+    from akkutest import netzteil as nt
+    nt.TRIGGER_WARTEN_S = 30
+    geraet.HID_INTERVALL = 0.02
+    SimulatorVerbindung.voreinstellung = {"tempo": 50}
+    sp = Speicher()
+    f = fenster.Fenster(sp)
+    f.resize(1280, 1000)
+    f.show()
+    f.reiter.setCurrentIndex(2)
+    f.anschluss.setCurrentIndex(f.anschluss.findText("Simulator – USB-Ladegerät", flags=fenster.Qt.MatchStartsWith))
+    f.verbinden_umschalten()
+    assert warten(lambda: f.geraet is not None and f.letzter is not None), meldungen
+    quelle = f.geraet.v.geraet.akku
+    f.nt.name.setText("Schnelllader")
+    f.nt.schnell.setChecked(True)
+    assert f.nt.schnell_box.isVisible() and not f.nt.nenn_v.isEnabled()
+    for v, haken, a in f.nt.trigger:
+        haken.setChecked(v in (5.0, 9.0, 15.0))
+        a.setValue(2.0 if v == 5.0 else 0)
+    f.nt.mit_dauer.setChecked(False)
+    f.nt.stufen.setValue(2)
+    f.nt.stufe_s.setValue(10)
+    assert "Umschalten" in f.nt.dauer.text(), f.nt.dauer.text()
+    f.nt.starten()
+    assert warten(lambda: "jetzt 5 V" in f.nt.schritt.text() and f.nt.knopf_weiter.isVisible(), 5), f.nt.schritt.text()
+    assert warten(lambda: "jetzt 9 V" in f.nt.schritt.text(), 30), f.nt.schritt.text()
+    foto(f, "10-trigger-umschalten")
+    quelle.nenn_v = 9.0                      # Mensch drückt am Adapter
+    assert warten(lambda: "jetzt 15 V" in f.nt.schritt.text(), 60), f.nt.schritt.text()
+    f.nt.knopf_weiter.click()                # 15 V gibt es nicht
+    assert warten(lambda: not f.nt.laeuft and f.nt.ergebnis.isVisible(), 30), f.nt.ablauf.zustand
+    text = f.nt.ergebnis.text()
+    print(f.nt.ablauf.ergebnis.grund)
+    assert "Unterstützt: 5 V, 9 V" in text and "15 V (übersprungen)" in text, text
+    assert "Liefert bis" in text and "ermittelt" in text
+    foto(f, "11-trigger-ergebnis")
+    alle = sp.netzteil_tests()
+    assert alle[0]["name"] == "Schnelllader" and f.nt.tabelle.item(0, 2).text() == "PD/QC 5/9 V", f.nt.tabelle.item(0, 2).text()
+    assert f.nt.tabelle.item(0, 4).text().startswith("bis ")
+    f.trennen()
+    f.close()
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

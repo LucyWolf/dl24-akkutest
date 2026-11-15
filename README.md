@@ -112,9 +112,28 @@ verbunden (oder ein PX100).
 Abgebrochen wird sofort, wenn die Spannung zusammenbricht oder die
 Temperaturgrenze erreicht ist. Der DL24 schafft höchstens 150 W.
 
-**USB-C- und Schnellladegeräte** geben 9 V, 12 V oder 20 V nur heraus, wenn
-das angeschlossene Gerät danach fragt. Das kann der DL24 nicht. Dafür braucht es
-einen PD/QC-Trigger-Adapter, sonst wird nur 5 V geprüft.
+**Steht kein Strom drauf?** Strom und Leistung auf „nicht angegeben“ lassen.
+Dann ermittelt das Programm, wie viel das Gerät liefert: Es steigert den Strom in
+0,25-A-Schritten, bis das Gerät abschaltet oder die Spannung einbricht.
+
+### Schnellladegeräte (USB-PD, QC, Fast Charging)
+
+9 V, 12 V, 15 V oder 20 V gibt ein Schnellladegerät nur heraus, wenn das
+angeschlossene Gerät danach fragt. Das kann der DL24 nicht. Dafür steckt ein
+**Trigger-Adapter** zwischen Ladegerät und DL24.
+
+1. Haken bei **Schnellladegerät** setzen.
+2. Die Spannungen ankreuzen, die geprüft werden sollen, und den Strom vom
+   Aufdruck eintragen (z. B. „9 V ⎓ 2 A“). Steht nichts drauf: „unbekannt“
+   lassen, dann wird ermittelt, wie viel es liefert.
+3. **Prüfen.** Das Programm sagt jeweils an, welche Spannung am Adapter
+   einzustellen ist, und beginnt, sobald sie anliegt. Kommt eine Spannung nicht,
+   gilt sie nach 2 Minuten als nicht unterstützt. Mit „Kommt nicht –
+   überspringen“ geht es sofort weiter.
+
+Im Ergebnis steht, welche Spannungen das Ladegerät kann, was es bei jeder
+liefert und ob es die Angaben hält. Kommen über den Adapter nur 5 V, kann es
+kein Schnellladen.
 
 ## Zwei Arten DL24
 
