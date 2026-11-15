@@ -168,6 +168,46 @@ def test_unbekannter_strom_ohne_trigger():
     assert abs(nt.bestleistung(r.als_dict())[1] - 2.5) < 1e-6
 
 
+def test_urteil_mit_und_ohne_kabel():
+    # wie Lucys Hub: gleichmäßig 0,34 Ω - bei 2 A kommen am Kabelende nur 4,37 V an
+    def hub(kabel):
+        q = SimNetzteil(5.0, innen_mohm=340, abschalt_a=9)
+        e = nt.NetzteilEinstellung("Hub", 5.0, 2.0, stufen=5, stufe_s=10, dauertest=False, kabel_mohm=kabel)
+        return durchspielen(q, e)[0].ergebnis
+    ohne = hub(0)
+    print("Hub ohne Kabelwert:", ohne.urteil, ohne.widerstand_mohm, ohne.gruende)
+    assert ohne.urteil == "nicht" and ohne.verspricht is True
+    assert 320 <= ohne.widerstand_mohm <= 360
+    assert any("Kabel" in g for g in ohne.gruende)
+    mit = hub(300)                          # Kabel + Adapter herausgerechnet
+    print("Hub mit Kabelwert:", mit.urteil, mit.gruende, mit.stufen[-1].buchse_v)
+    assert mit.urteil == "gut" and mit.stufen[-1].buchse_v > 4.9
+    knapp = hub(150)                        # Buchse 4,67 V: unter der Toleranz, über 4,4 V
+    assert knapp.urteil == "eingeschraenkt", (knapp.urteil, knapp.gruende)
+
+
+def test_zu_hohe_spannung():
+    q = SimNetzteil(5.6, innen_mohm=50, abschalt_a=9)
+    e = nt.NetzteilEinstellung("Billig", 5.0, 1.0, stufen=2, stufe_s=10, dauertest=False, toleranz_proz=20)
+    r = durchspielen(q, e)[0].ergebnis
+    assert r.urteil == "nicht" and "Leerlauf" in r.gruende[0], r.gruende
+
+
+def test_maximum_suchen():
+    q = SimNetzteil(5.0, innen_mohm=60, abschalt_a=3.8)
+    e = nt.NetzteilEinstellung("Lader", 5.0, 2.0, stufen=4, stufe_s=10, dauertest=False,
+                               abschalttest=True, bis_ende=True)
+    assert e.hoechster_strom() == 5.0 and nt.plan(e)[-1].soll_a == 5.0
+    r = durchspielen(q, e)[0].ergebnis
+    print("Maximum:", r.grund, r.max_w, r.max_w_tol)
+    assert r.abschalt_a == 3.9 and r.urteil == "gut"
+    assert 18 < r.max_w < 19 and r.max_w_tol == r.max_w      # 3,8 A × ~4,82 V
+    nie = nt.NetzteilEinstellung("Stark", 5.0, 2.0, stufen=2, stufe_s=10, dauertest=False,
+                                 abschalttest=True, bis_ende=True)
+    r = durchspielen(SimNetzteil(5.0, innen_mohm=20, abschalt_a=99, heiz_c_je_w=0.5), nie, tempo=300)[0].ergebnis
+    assert r.abschalt_a is None and "5 A bei USB" in r.grund and r.max_getestet_a == 5.0, r.grund
+
+
 if __name__ == "__main__":
     for n, f in list(globals().items()):
         if n.startswith("test_"):

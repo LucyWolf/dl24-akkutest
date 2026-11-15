@@ -239,7 +239,20 @@ def test_netzteil_reiter():
     print("Netzteil:", r.grund, r.abschalt_a)
     assert r.haelt is True and r.abschalt_a and 2.6 < r.abschalt_a <= 2.75
     text = f.nt.ergebnis.text()
-    assert "Hält die Angabe" in text and "schaltet ab bei 2,70 A" in text and "Kennlinie" in text, text
+    assert "Empfehlenswert" in text and "Schafft, was es verspricht" in text, text
+    assert "schaltet ab bei 2,70 A" in text and "Kennlinie" in text and "Widerstand" in text, text
+    # Bericht als PDF
+    pdf = Path(os.environ["AKKUTEST_DATEN"]) / "bericht.pdf"
+    assert f.nt.bericht_speichern(str(pdf)) == str(pdf)
+    assert pdf.read_bytes()[:4] == b"%PDF" and pdf.stat().st_size > 20000, pdf.stat().st_size
+    if FOTOS:
+        import shutil
+        shutil.copy(pdf, FOTOS / "bericht.pdf")
+    # Widerstand als Kabelwert
+    assert f.nt.knopf_kabel.isEnabled()
+    f.nt.knopf_kabel.click()
+    assert 100 <= f.nt.kabel.value() <= 150, f.nt.kabel.value()       # Simulator: 120 mΩ
+    f.nt.kabel.setValue(0)
     assert "Temperatur" in text and "°C" in text
     assert not f.geraet.v.geraet.an
     marken = [x.label.toPlainText() for x in f.nt._marken]
@@ -248,11 +261,12 @@ def test_netzteil_reiter():
     # gespeichert und in der Liste
     alle = sp.netzteil_tests()
     assert len(alle) == 1 and alle[0]["name"] == "Test-Lader" and alle[0]["haelt"] == 1
-    assert f.nt.tabelle.rowCount() == 1 and "hält" in f.nt.tabelle.item(0, 3).text()
+    assert f.nt.tabelle.rowCount() == 1
     f.nt.ergebnis.setText("")
     f.nt.tabelle.selectRow(0)
     app.processEvents()
-    assert "Hält die Angabe" in f.nt.ergebnis.text()
+    assert "Empfehlenswert" in f.nt.ergebnis.text()
+    assert "✔" in f.nt.tabelle.item(0, 3).text() and "Empfehlenswert" in f.nt.tabelle.item(0, 3).text()
     f.trennen()
     f.close()
 

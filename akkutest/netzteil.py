@@ -72,6 +72,8 @@ class NetzteilEinstellung:
     temp_grenze: float = 70.0
     trigger: list = field(default_factory=list)   # [[V, A], …] bei Schnellladegeräten
     unbekannt: bool = False   # Strom unbekannt: Leistung ermitteln statt Angabe prüfen
+    bis_ende: bool = False    # Abschalttest bis zum Abschalten (höchstens 5 A bei USB / 150 W)
+    kabel_mohm: float = 0.0   # Kabel + Adapter: wird herausgerechnet (Spannung an der Buchse)
 
     @property
     def strom_a(self) -> float:
@@ -88,8 +90,27 @@ class NetzteilEinstellung:
     def obere_v(self) -> float:
         return self.nenn_v * (1 + self.toleranz_proz / 100)
 
+    @property
+    def usb(self) -> bool:
+        return self.nenn_v <= 5.5
+
+    @property
+    def mindest_v(self) -> float:
+        """Darunter: nicht verwenden. USB: 4,4 V am Gerät; sonst die doppelte Toleranz."""
+        return 4.4 if self.usb else self.nenn_v * (1 - 2 * self.toleranz_proz / 100)
+
+    @property
+    def hoechst_v(self) -> float:
+        """Darüber im Leerlauf: gefährlich für angeschlossene Geräte."""
+        return 5.5 if self.usb else self.nenn_v * (1 + 2 * self.toleranz_proz / 100)
+
+    def such_ende_a(self) -> float:
+        return max(such_grenze(self.nenn_v, self.usb), self.strom_a) if self.nenn_v > 0 else 0.0
+
     def hoechster_strom(self) -> float:
         a = self.strom_a
+        if self.abschalttest and self.bis_ende:
+            return self.such_ende_a()
         if self.abschalttest:
             return a * self.max_proz / 100
         if self.dauertest:
@@ -106,8 +127,8 @@ class NetzteilEinstellung:
             return "Bitte mindestens einen Test auswählen."
         w = self.hoechster_strom() * self.nenn_v
         if w > DL24_MAX_W:
-            return (f"Der Test bräuchte bis zu {w:.0f} W ({self.hoechster_strom():.2f} A × {self.nenn_v:g} V). "
-                    f"Der DL24 schafft {DL24_MAX_W:.0f} W - Grenze oder Dauerstrom senken.")
+            return (f"Der Test bräuchte bis zu {_k(w, 0)} W ({_k(self.hoechster_strom(), 2)} A × {self.nenn_v:g} V). "
+                    f"Der DL24 schafft {_k(DL24_MAX_W, 0)} W - Grenze oder Dauerstrom senken.")
         return None
 
 
@@ -143,6 +164,7 @@ class StufenWert:
     min_v: float
     strom: float
     ok: bool
+    buchse_v: float | None = None    # um das Kabel berichtigt (nur mit Kabelwert)
 
     @property
     def leistung(self) -> float:
@@ -165,6 +187,13 @@ class NetzteilErgebnis:
     haelt: bool | None = None            # hält es die Angabe? None = nicht entscheidbar
     hinweise: list[str] = field(default_factory=list)
     marken: list = field(default_factory=list)       # [(Sekunde, "0,40 A"), …] - Stufenwechsel fürs Diagramm
+    zu_heiss: bool = False
+    widerstand_mohm: float | None = None   # Steigung der Kennlinie: Netzteil + Kabel
+    urteil: str | None = None              # "gut" | "eingeschraenkt" | "nicht" | None
+    gruende: list[str] = field(default_factory=list)
+    verspricht: bool | None = None         # liefert den angegebenen Strom ohne abzuschalten?
+    max_w_tol: float | None = None         # höchste Leistung mit Spannung in der Toleranz
+    max_w: float | None = None             # höchste Leistung überhaupt (vor dem Abschalten)
 
     def als_dict(self) -> dict:
         d = dict(self.__dict__)
@@ -182,11 +211,94 @@ def plan(e: NetzteilEinstellung) -> list[Schritt]:
     if e.dauertest:
         s.append(Schritt("dauer", round(a * e.dauer_proz / 100, 3), e.dauer_min * 60))
     if e.abschalttest:
+        bis = e.such_ende_a() / a if e.bis_ende else e.max_proz / 100
         k = 1.0 + ABSCHALT_SCHRITT
-        while k <= e.max_proz / 100 + 1e-9:
+        while k <= bis + 1e-9:
             s.append(Schritt("abschalt", round(a * k, 3), ABSCHALT_STUFE_S))
             k += ABSCHALT_SCHRITT
+        if e.bis_ende and (not s or s[-1].soll_a < e.such_ende_a() - 1e-6):
+            s.append(Schritt("abschalt", round(e.such_ende_a(), 3), ABSCHALT_STUFE_S))
     return s
+
+
+def widerstand(stufen: list) -> float | None:
+    """Ausgleichsgerade durch die Kennlinie: wie viel Volt pro Ampere verloren gehen."""
+    p = [(s.strom, s.spannung) for s in stufen if s.strom > 0.01]
+    if len(p) < 2:
+        return None
+    mx = sum(x for x, _ in p) / len(p)
+    my = sum(y for _, y in p) / len(p)
+    nenner = sum((x - mx) ** 2 for x, _ in p)
+    if nenner < 1e-9:
+        return None
+    steigung = sum((x - mx) * (y - my) for x, y in p) / nenner
+    return round(max(0.0, -steigung) * 1000, 0)
+
+
+def _k(x: float, stellen: int | None = 2) -> str:
+    """Zahl mit Komma - die Gründe stehen so im Ergebnis."""
+    t = f"{x:g}" if stellen is None else f"{x:.{stellen}f}"
+    return t.replace(".", ",")
+
+
+def bewerten(e: NetzteilEinstellung, r: NetzteilErgebnis) -> None:
+    """Klare Aussage: empfehlenswert, eingeschränkt oder nicht verwenden - und
+    getrennt davon, ob es den versprochenen Strom liefert."""
+    kabel = e.kabel_mohm / 1000
+    an_buchse = lambda st, v: v + st.strom * kabel
+    bis_nenn = [x for x in r.stufen if x.soll_a <= e.strom_a + 1e-6]
+    if r.dauer:
+        bis_nenn.append(r.dauer)
+    r.widerstand_mohm = widerstand([x for x in r.stufen if x.soll_a <= e.strom_a + 1e-6] or r.stufen)
+    in_tol = [x for x in r.stufen if an_buchse(x, x.min_v) >= e.untere_v]
+    r.max_w_tol = round(max((x.spannung * x.strom for x in in_tol), default=0), 2) or None
+    r.max_w = round(max((x.spannung * x.strom for x in r.stufen), default=0), 2) or None
+    gruende: list[str] = []
+    schlimm = False
+    knapp = False
+    if r.leerlauf_v is not None and r.leerlauf_v > e.hoechst_v:
+        schlimm = True
+        gruende.append(f"Zu hohe Spannung im Leerlauf ({_k(r.leerlauf_v)} V, höchstens {_k(e.hoechst_v)} V) – "
+                       "kann angeschlossene Geräte beschädigen")
+    if e.unbekannt:
+        r.verspricht = None
+    else:
+        ausgefallen = r.abschalt_a is not None and r.abschalt_a <= e.strom_a + 1e-6
+        nenn_da = any(x.soll_a >= e.strom_a - 1e-6 for x in bis_nenn)
+        r.verspricht = False if ausgefallen else (True if nenn_da else None)
+        if ausgefallen:
+            schlimm = True
+            gruende.append(f"Schaltet schon bei {_k(r.abschalt_a)} A ab – angegeben sind {_k(e.strom_a)} A")
+        tiefst = min((an_buchse(x, x.min_v) for x in bis_nenn), default=None)
+        if tiefst is not None:
+            wo = "an der Buchse" if kabel else "am Kabelende"
+            if tiefst < e.mindest_v:
+                schlimm = True
+                gruende.append(f"Spannung fällt bis zum Nennstrom auf {_k(tiefst)} V {wo} "
+                               f"(Mindestwert {_k(e.mindest_v)} V)")
+            elif tiefst < e.untere_v:
+                knapp = True
+                gruende.append(f"Spannung fällt bis zum Nennstrom auf {_k(tiefst)} V {wo} – unter der Toleranz "
+                               f"({_k(e.untere_v)} V), aber über dem Mindestwert")
+    if r.zu_heiss:
+        schlimm = True
+        gruende.append(f"Wird zu heiß (über {_k(e.temp_grenze, None)} °C)")
+    if e.unbekannt and not schlimm:
+        r.urteil = None
+    elif schlimm:
+        r.urteil = "nicht"
+    elif knapp:
+        r.urteil = "eingeschraenkt"
+    elif r.verspricht:
+        r.urteil = "gut"
+    else:
+        r.urteil = None
+    if r.urteil == "gut":
+        gruende.append("Liefert den angegebenen Strom, Spannung in der Toleranz")
+    if r.widerstand_mohm and not kabel and r.widerstand_mohm > 150 and e.usb:
+        gruende.append(f"Hoher Widerstand ({_k(r.widerstand_mohm, 0)} mΩ) – oft ist es das Kabel. Kabelwert "
+                       "eintragen, dann wird es herausgerechnet")
+    r.gruende = gruende
 
 
 @dataclass
@@ -226,7 +338,7 @@ class NetzteilAblauf:
             return ""
         text = {"stufe": "Stufentest", "dauer": "Dauertest", "abschalt": "Abschalttest"}[s.art]
         anteil = s.soll_a / self.einstellung.strom_a * 100
-        return f"{text}: {s.soll_a:.2f} A ({anteil:.0f} %), Schritt {self.i + 1}/{len(self.schritte)}"
+        return f"{text}: {_k(s.soll_a, 2)} A ({_k(anteil, 0)} %), Schritt {self.i + 1}/{len(self.schritte)}"
 
     def messwert(self, m: Messwert) -> None:
         try:
@@ -259,22 +371,22 @@ class NetzteilAblauf:
         r.leerlauf_v = round(sum(self._ll) / len(self._ll), 3)
         r.temp_start = m.temp_fuehler
         if r.leerlauf_v < e.nenn_v * ZUSAMMENBRUCH:
-            self._beenden(f"Keine Spannung am Eingang ({r.leerlauf_v:.2f} V statt {e.nenn_v:g} V). "
+            self._beenden(f"Keine Spannung am Eingang ({_k(r.leerlauf_v, 2)} V statt {e.nenn_v:g} V). "
                           "Ist das Netzteil eingesteckt und am DL24 angeschlossen?", False, "abgebrochen")
             return
         if r.leerlauf_v > e.nenn_v * 1.25:
-            self._beenden(f"Die Spannung ({r.leerlauf_v:.2f} V) liegt weit über der Angabe ({e.nenn_v:g} V) - "
+            self._beenden(f"Die Spannung ({_k(r.leerlauf_v, 2)} V) liegt weit über der Angabe ({e.nenn_v:g} V) - "
                           "falsches Gerät oder falsche Angabe?", False, "abgebrochen")
             return
         if r.leerlauf_v > e.obere_v:
-            r.hinweise.append(f"Leerlaufspannung {r.leerlauf_v:.3f} V liegt über der Toleranz "
-                              f"(bis {e.obere_v:.2f} V).")
+            r.hinweise.append(f"Leerlaufspannung {_k(r.leerlauf_v, 3)} V liegt über der Toleranz "
+                              f"(bis {_k(e.obere_v, 2)} V).")
         # Schutz im Gerät: bricht die Spannung zusammen, schaltet der DL24 selbst ab
         self.geraet.abschaltung_setzen(round(e.nenn_v * ZUSAMMENBRUCH, 2))
         self.geraet.zaehler_null()
         self._t0 = m.zeit
         self.zustand = "laeuft"
-        self.bei_ereignis("info", f"Leerlauf {r.leerlauf_v:.3f} V – Test beginnt")
+        self.bei_ereignis("info", f"Leerlauf {_k(r.leerlauf_v, 3)} V – Test beginnt")
         self._naechster(m)
 
     def _naechster(self, m: Messwert) -> None:
@@ -287,7 +399,7 @@ class NetzteilAblauf:
         self._schritt_t0 = m.zeit
         art = {"stufe": "", "dauer": "Dauer ", "abschalt": "↑ "}[s.art]
         self.ergebnis.marken.append((round(m.zeit - (self._t0 or m.zeit), 1),
-                                     f"{art}{s.soll_a:.2f} A".replace(".", ",")))
+                                     f"{art}{_k(s.soll_a, 2)} A".replace(".", ",")))
         self._werte = []
         self._aus = self._zu_wenig = 0
         self.geraet.strom_setzen(s.soll_a)
@@ -305,8 +417,9 @@ class NetzteilAblauf:
             if m.temp_fuehler >= e.temp_grenze:
                 self._last_aus()
                 r.hinweise.append(f"Temperaturgrenze {e.temp_grenze:g} °C erreicht.")
+                r.zu_heiss = True
                 self._werten_schritt()
-                self._fertig(f"Abgebrochen: {m.temp_fuehler:.0f} °C am Fühler "
+                self._fertig(f"Abgebrochen: {_k(m.temp_fuehler, 0)} °C am Fühler "
                              f"(Grenze {e.temp_grenze:g} °C)", haelt_moeglich=False)
                 return
         im_schritt = m.zeit - self._schritt_t0
@@ -323,8 +436,8 @@ class NetzteilAblauf:
             self._last_aus()
             art = "abgeschaltet" if self._aus >= 2 else "eingebrochen"
             r.abschalt_a, r.abschalt_art = s.soll_a, art   # diese Stufe zählt nicht als geschafft
-            text = (f"Netzteil hat bei {s.soll_a:.2f} A abgeschaltet" if art == "abgeschaltet"
-                    else f"Netzteil liefert {s.soll_a:.2f} A nicht (nur {m.strom:.2f} A)")
+            text = (f"Netzteil hat bei {_k(s.soll_a, 2)} A abgeschaltet" if art == "abgeschaltet"
+                    else f"Netzteil liefert {_k(s.soll_a, 2)} A nicht (nur {_k(m.strom, 2)} A)")
             self._fertig(text)
             return
         if not (weg or zu_wenig):
@@ -340,9 +453,12 @@ class NetzteilAblauf:
         # nur die zweite Hälfte: dann hat sich die Spannung gesetzt
         w = self._werte[len(self._werte) // 2:]
         v = sum(x.spannung for x in w) / len(w)
-        sw = StufenWert(s.soll_a, round(v, 3), round(min(x.spannung for x in w), 3),
-                        round(sum(x.strom for x in w) / len(w), 3),
-                        ok=min(x.spannung for x in w) >= e.untere_v)
+        i = sum(x.strom for x in w) / len(w)
+        tief = min(x.spannung for x in w)
+        kabel = i * e.kabel_mohm / 1000            # was im Kabel verloren geht
+        sw = StufenWert(s.soll_a, round(v, 3), round(tief, 3), round(i, 3),
+                        ok=tief + kabel >= e.untere_v,
+                        buchse_v=round(v + kabel, 3) if e.kabel_mohm else None)
         if s.art == "dauer":
             self.ergebnis.dauer = sw
         else:
@@ -363,12 +479,16 @@ class NetzteilAblauf:
         elif nenn_erreicht and haelt_moeglich:
             haelt = True
         r.haelt = haelt
+        bewerten(e, r)
         if not grund and e.unbekannt:
-            grund = f"Bis {r.max_getestet_a:.2f} A ohne Abschaltung - Grenze der Suche"
+            grund = f"Bis {_k(r.max_getestet_a, 2)} A ohne Abschaltung - Grenze der Suche"
         if not grund:
             grund = "Alle Schritte durchlaufen"
-            if e.abschalttest and r.abschalt_a is None:
-                grund = (f"Bis {r.max_getestet_a:.2f} A ({r.max_getestet_a / e.strom_a * 100:.0f} %) "
+            if e.abschalttest and e.bis_ende and r.abschalt_a is None:
+                grund = (f"Bis {_k(r.max_getestet_a, 2)} A keine Abschaltung - mehr lässt der Test nicht zu "
+                         f"({'5 A bei USB' if e.usb else 'Grenze des DL24'})")
+            elif e.abschalttest and r.abschalt_a is None:
+                grund = (f"Bis {_k(r.max_getestet_a, 2)} A ({_k(r.max_getestet_a / e.strom_a * 100, 0)} %) "
                          "keine Abschaltung - Grenze erreicht")
         self._beenden(grund, haelt is not None or e.unbekannt)
 
@@ -404,6 +524,8 @@ class TriggerErgebnis:
     vollstaendig: bool = False
     haelt: bool | None = None
     marken: list = field(default_factory=list)
+    urteil: str | None = None
+    verspricht: bool | None = None
 
     def als_dict(self) -> dict:
         return dict(self.__dict__)
@@ -524,7 +646,7 @@ class TriggerAblauf:
         if self._ueberspringen or m.zeit - self._warten_seit >= TRIGGER_WARTEN_S:
             grund = "übersprungen" if self._ueberspringen else "kam nicht"
             self.ergebnis.nicht.append({"volt": v, "gemessen": round(m.spannung, 2), "grund": grund})
-            self.bei_ereignis("info", f"{v:g} V {grund} (gemessen {m.spannung:.2f} V)")
+            self.bei_ereignis("info", f"{v:g} V {grund} (gemessen {_k(m.spannung, 2)} V)")
             self._weiter()
 
     def _teil_ereignis(self, art: str, text: str) -> None:
@@ -574,6 +696,13 @@ class TriggerAblauf:
                 grund += "; nicht unterstützt: " + ", ".join(f"{n['volt']:g} V" for n in r.nicht)
         r.grund = grund
         r.vollstaendig = zustand == "fertig"
+        # Gesamturteil: das schlechteste der einzelnen Spannungen
+        rang = {"nicht": 3, "eingeschraenkt": 2, "gut": 1}
+        einzeln = [t["ergebnis"].get("urteil") for t in r.teile if t["ergebnis"].get("urteil")]
+        r.urteil = max(einzeln, key=rang.get) if einzeln else None
+        r.verspricht = False if any(n["grund"] == "kam nicht" for n in r.nicht) or any(
+            t["ergebnis"].get("verspricht") is False for t in r.teile) else (
+            True if any(t["ergebnis"].get("verspricht") for t in r.teile) else None)
         self.zustand = zustand
         log.info("Triggerprüfung beendet: %s", grund)
         self.bei_ereignis("fertig", grund)

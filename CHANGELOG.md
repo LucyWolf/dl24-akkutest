@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.19 – 15.11.2026
+
+- **Klares Urteil** bei Netzteilen und Ladegeräten: ✔ Empfehlenswert,
+  ⚠ Eingeschränkt verwendbar oder ✘ Nicht verwenden – mit Begründung. Getrennt
+  davon: schafft es, was es verspricht? Zu hohe Spannung im Leerlauf (USB über
+  5,5 V) gilt als gefährlich.
+- **Größte Leistung finden:** Abschalttest „bis zum Ende“ steigert, bis das
+  Gerät abschaltet (höchstens 5 A bei USB / 150 W). Im Ergebnis: größte Leistung
+  in der Toleranz und bis zum Abschalten.
+- **Kabel herausrechnen:** Widerstand aus der Kennlinie; mit „als Kabelwert
+  übernehmen“ wird er bei den nächsten Prüfungen abgezogen, das Urteil gilt dann
+  für die Spannung an der Buchse.
+- **Bericht als PDF** mit Urteil, Werten, Kennlinie und Diagramm.
+- Zahlen in den Meldungen mit Komma.
+
 ## 1.0.18 – 15.11.2026
 
 - Im Diagramm der Netzteilprüfung steht an jedem Stufenwechsel eine Linie mit

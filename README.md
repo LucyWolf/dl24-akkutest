@@ -105,9 +105,29 @@ verbunden (oder ein PX100).
 | Dauertest | Ein fester Strom über längere Zeit, mit Temperatur. Zeigt, ob das Gerät warm wird und dann nachgibt. |
 | Abschalttest | Über die Angabe hinaus in 5-%-Schritten, bis das Gerät abschaltet oder die Spannung einbricht – höchstens bis zur eingestellten Grenze. |
 
-5. **Prüfen.** Am Ende steht da, ob das Gerät die Angabe **hält**, mit
-   Kennlinie, Abschaltgrenze und höchster Temperatur. Jede Prüfung wird
-   gespeichert.
+5. **Prüfen.** Am Ende steht ein klares Urteil, dazu Kennlinie,
+   Abschaltgrenze, größte Leistung und höchste Temperatur. Jede Prüfung wird
+   gespeichert, mit **Bericht speichern (PDF)** lässt sie sich weitergeben.
+
+| Urteil | Bedeutung |
+|---|---|
+| ✔ Empfehlenswert | Liefert den angegebenen Strom, die Spannung bleibt in der Toleranz. |
+| ⚠ Eingeschränkt verwendbar | Liefert den Strom, die Spannung sackt aber unter die Toleranz (bei USB unter 4,75 V, über 4,4 V). Zum Laden meist in Ordnung, für empfindliche Geräte nicht. |
+| ✘ Nicht verwenden | Schaltet vor dem angegebenen Strom ab, die Spannung fällt unter den Mindestwert (USB 4,4 V), zu hohe Spannung im Leerlauf (USB über 5,5 V) oder wird zu heiß. |
+
+Getrennt davon steht da, ob es **schafft, was es verspricht**, also den
+angegebenen Strom ohne Abschalten liefert.
+
+**Größte Leistung finden:** Beim Abschalttest „bis zum Ende“ ankreuzen. Dann
+wird gesteigert, bis das Gerät abschaltet oder einbricht – höchstens 5 A bei
+USB und 150 W.
+
+**Das Kabel zählt mit.** Gemessen wird am DL24, also hinter Kabel und Adapter.
+Ein dünnes USB-Kabel verliert bei 2 A leicht 0,5 V. Damit das nicht dem
+Netzteil angelastet wird: dasselbe Kabel einmal an einem **guten Ladegerät**
+prüfen, im Ergebnis **„Widerstand als Kabelwert übernehmen“** drücken. Ab dann
+wird das Kabel herausgerechnet, und das Urteil gilt für die Spannung an der
+Buchse.
 
 Abgebrochen wird sofort, wenn die Spannung zusammenbricht oder die
 Temperaturgrenze erreicht ist. Der DL24 schafft höchstens 150 W.

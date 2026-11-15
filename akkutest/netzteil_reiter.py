@@ -25,6 +25,28 @@ def _kurz(x: float) -> str:
     return f"{x:g}".replace(".", ",")
 
 
+URTEILE = {"gut": ("✔ Empfehlenswert", "#2e9e4f"),
+           "eingeschraenkt": ("⚠ Eingeschränkt verwendbar", "#c77700"),
+           "nicht": ("✘ Nicht verwenden", "#d03b3b")}
+
+
+def urteil_html(r: dict) -> list[str]:
+    """Die klare Aussage oben im Ergebnis. Alte Prüfungen haben noch keins."""
+    aus = []
+    u = r.get("urteil")
+    if u in URTEILE:
+        wort, farbe = URTEILE[u]
+        aus.append(f"<b style='color:{farbe}; font-size:17px'>{wort}</b>")
+    v = r.get("verspricht")
+    if v is True:
+        aus.append("<b style='color:#2e9e4f'>✔ Schafft, was es verspricht</b>")
+    elif v is False:
+        aus.append("<b style='color:#d03b3b'>✘ Schafft nicht, was es verspricht</b>")
+    for g in r.get("gruende") or []:
+        aus.append(f"• {html.escape(g)}")
+    return aus
+
+
 def ergebnis_html(e: dict, r: dict) -> str:
     """Aus gespeicherten Werten (dict), damit es auch für alte Tests geht."""
     if "teile" in r:
@@ -47,6 +69,10 @@ def ergebnis_html(e: dict, r: dict) -> str:
         else:
             zeilen.append("<b style='color:#d03b3b; font-size:14px'>Schon bei der ersten Stufe "
                           "außerhalb der Toleranz</b>")
+    if "urteil" in r:
+        zeilen += urteil_html(r)
+    elif unbekannt:
+        pass
     elif r.get("haelt") is True:
         zeilen.append("<b style='color:#2e9e4f; font-size:14px'>✔ Hält die Angabe</b>")
     elif r.get("haelt") is False:
@@ -62,8 +88,25 @@ def ergebnis_html(e: dict, r: dict) -> str:
     if nenn and r.get("leerlauf_v") is not None and not unbekannt:
         s = nenn[0]
         abfall = (r["leerlauf_v"] - s["spannung"]) * 1000
-        tab.append(("Bei Nennstrom", f"<b>{zahl(s['spannung'], 3)} V</b> bei {zahl(s['strom'], 2)} A "
-                                     f"(−{abfall:.0f} mV)"))
+        text = f"<b>{zahl(s['spannung'], 3)} V</b> bei {zahl(s['strom'], 2)} A (−{abfall:.0f} mV)"
+        if s.get("buchse_v"):
+            text = (f"<b>{zahl(s['buchse_v'], 3)} V an der Buchse</b>, {zahl(s['spannung'], 3)} V am Kabelende "
+                    f"bei {zahl(s['strom'], 2)} A")
+        tab.append(("Bei Nennstrom", text))
+    if r.get("widerstand_mohm"):
+        w_ges, kabel = r["widerstand_mohm"], e.get("kabel_mohm", 0)
+        if kabel:
+            text = (f"{w_ges:.0f} mΩ gesamt, davon Kabel {kabel:.0f} mΩ → Netzteil ≈ "
+                    f"<b>{max(0, w_ges - kabel):.0f} mΩ</b>")
+        else:
+            text = f"<b>{w_ges:.0f} mΩ</b> (Netzteil + Kabel + Adapter)"
+        tab.append(("Widerstand", text))
+    if r.get("max_w") is not None:
+        text = f"in der Toleranz <b>{zahl(r['max_w_tol'], 1) + ' W' if r.get('max_w_tol') else '–'}</b>"
+        text += f" · höchstens {zahl(r['max_w'], 1)} W"
+        if r.get("abschalt_a") is not None:
+            text += " (danach Abschaltung)"
+        tab.append(("Leistung", text))
     d = r.get("dauer")
     if d:
         farbe = "#2e9e4f" if d["ok"] else "#d03b3b"
@@ -93,11 +136,16 @@ def ergebnis_html(e: dict, r: dict) -> str:
     zeilen.append("<table cellspacing=4>" + "".join(
         f"<tr><td style='color:gray'>{k}</td><td>{v}</td></tr>" for k, v in tab) + "</table>")
     if stufen:
+        buchse = any(s.get("buchse_v") for s in stufen)
         kopf = "<tr><td style='color:gray'>Strom</td><td style='color:gray'>Spannung</td>" \
-               "<td style='color:gray'>tiefster</td><td style='color:gray'>Leistung</td><td></td></tr>"
+               "<td style='color:gray'>tiefster</td>" + \
+               ("<td style='color:gray'>an der Buchse</td>" if buchse else "") + \
+               "<td style='color:gray'>Leistung</td><td></td></tr>"
         reihen = "".join(
             f"<tr><td>{zahl(s['soll_a'], 2)} A</td><td>{zahl(s['spannung'], 3)} V</td>"
-            f"<td>{zahl(s['min_v'], 3)} V</td><td>{zahl(s['spannung'] * s['strom'], 1)} W</td>"
+            f"<td>{zahl(s['min_v'], 3)} V</td>"
+            + (f"<td>{zahl(s.get('buchse_v'), 3)} V</td>" if buchse else "") +
+            f"<td>{zahl(s['spannung'] * s['strom'], 1)} W</td>"
             f"<td style='color:{'#2e9e4f' if s['ok'] else '#d03b3b'}'>{'✔' if s['ok'] else '✘ unter ' + zahl(unten) + ' V'}</td></tr>"
             for s in stufen)
         zeilen.append("<b>Kennlinie</b><table cellspacing=6>" + kopf + reihen + "</table>")
@@ -109,7 +157,9 @@ def ergebnis_html(e: dict, r: dict) -> str:
 def trigger_html(e: dict, r: dict) -> str:
     zeilen = [f"<b style='font-size:15px'>{html.escape(e['name'] or 'Ladegerät')}</b> – Schnellladen über "
               "Trigger-Adapter"]
-    if r.get("haelt") is True:
+    if "urteil" in r:
+        zeilen += urteil_html(r)
+    elif r.get("haelt") is True:
         zeilen.append("<b style='color:#2e9e4f; font-size:14px'>✔ Hält alle Angaben</b>")
     elif r.get("haelt") is False:
         zeilen.append("<b style='color:#d03b3b; font-size:14px'>✘ Hält nicht alles, was angegeben ist</b>")
@@ -185,6 +235,12 @@ class NetzteilReiter(QWidget):
         self.toleranz = self._zahlfeld(1, 20, 1, 1, " %")
         self.toleranz.setValue(5)
         f.addRow("Toleranz Spannung:", self.toleranz)
+        self.kabel = self._zahlfeld(0, 3000, 0, 10, " mΩ", "nicht bekannt")
+        self.kabel.setToolTip("Widerstand von USB-Kabel und Adapter (Hin- und Rückleitung). Wird herausgerechnet, "
+                              "damit das Kabel nicht dem Netzteil angelastet wird.\n\nSo bekommst du ihn: dasselbe "
+                              "Kabel an einem guten Ladegerät prüfen und im Ergebnis „als Kabelwert übernehmen“.")
+        self.kabel.valueChanged.connect(self._angabe_zeigen)
+        f.addRow("Kabel + Adapter:", self.kabel)
         self.schnell = QCheckBox("Schnellladegerät (USB-PD / QC / Fast Charging)")
         self.schnell.setToolTip("9 V, 12 V, 15 V, 20 V gibt das Ladegerät nur über einen Trigger-Adapter heraus")
         self.schnell.toggled.connect(self._schnell_umschalten)
@@ -256,8 +312,14 @@ class NetzteilReiter(QWidget):
         self.max_proz.setValue(130)
         self.max_proz.setPrefix("bis ")
         self.max_proz.setSuffix(" %")
+        self.bis_ende = QCheckBox("bis zum Ende")
+        self.bis_ende.setToolTip("Weiter steigern, bis das Netzteil abschaltet oder die Spannung einbricht - "
+                                 "höchstens 5 A bei USB und 150 W. Zeigt die größte Leistung.")
+        self.bis_ende.toggled.connect(lambda an: (self.max_proz.setEnabled(not an and not self.laeuft),
+                                                  self._dauer_zeigen()))
         f.addWidget(self.mit_abschalt, 2, 0)
         f.addWidget(self.max_proz, 2, 1)
+        f.addWidget(self.bis_ende, 2, 2)
         f.addWidget(QLabel("Temperaturgrenze:"), 3, 0)
         self.temp_grenze = QSpinBox()
         self.temp_grenze.setRange(30, 120)
@@ -357,6 +419,19 @@ class NetzteilReiter(QWidget):
         ul = QVBoxLayout(unten)
         ul.setContentsMargins(0, 0, 0, 0)
         kopf = QHBoxLayout()
+        knoepfe = QHBoxLayout()
+        self.knopf_kabel = QPushButton("Widerstand als Kabelwert übernehmen")
+        self.knopf_kabel.setToolTip("Nur bei einem guten Ladegerät sinnvoll: dann ist fast der ganze "
+                                    "Widerstand das Kabel")
+        self.knopf_kabel.clicked.connect(self._kabel_uebernehmen)
+        self.knopf_pdf = QPushButton("Bericht speichern (PDF) …")
+        self.knopf_pdf.clicked.connect(self.bericht_speichern)
+        knoepfe.addWidget(self.knopf_kabel)
+        knoepfe.addStretch(1)
+        knoepfe.addWidget(self.knopf_pdf)
+        self.knopf_kabel.setEnabled(False)
+        self.knopf_pdf.setEnabled(False)
+        ul.addLayout(knoepfe)
         kopf.addWidget(QLabel("<b>Bisherige Prüfungen</b>"))
         kopf.addStretch(1)
         self.knopf_loeschen = QPushButton("Löschen")
@@ -438,7 +513,8 @@ class NetzteilReiter(QWidget):
             stufentest=self.mit_stufen.isChecked(), stufen=self.stufen.value(), stufe_s=self.stufe_s.value(),
             dauertest=self.mit_dauer.isChecked(), dauer_proz=self.dauer_proz.value(),
             dauer_min=self.dauer_min.value(), abschalttest=self.mit_abschalt.isChecked(),
-            max_proz=self.max_proz.value(), temp_grenze=self.temp_grenze.value())
+            max_proz=self.max_proz.value(), temp_grenze=self.temp_grenze.value(),
+            bis_ende=self.bis_ende.isChecked(), kabel_mohm=self.kabel.value())
 
     def _angabe_zeigen(self) -> None:
         e = self.einstellung()
@@ -501,9 +577,10 @@ class NetzteilReiter(QWidget):
             w.setEnabled(not self.laeuft)
         for w in (self.vorlage, self.nenn_v, self.nenn_a, self.nenn_w):
             w.setEnabled(not self.laeuft and not self.schnell.isChecked())
+        self.max_proz.setEnabled(not self.laeuft and not self.bis_ende.isChecked())
         for w in (self.name, self.toleranz,
                   self.mit_stufen, self.stufen, self.stufe_s, self.mit_dauer, self.dauer_proz,
-                  self.dauer_min, self.mit_abschalt, self.max_proz, self.temp_grenze):
+                  self.dauer_min, self.mit_abschalt, self.temp_grenze, self.kabel, self.bis_ende):
             w.setEnabled(not self.laeuft)
         if not g:
             self.steuer_hinweis.setText("Erst verbinden.")
@@ -616,7 +693,7 @@ class NetzteilReiter(QWidget):
         if ab.ergebnis.dauer_s >= 5:
             self.f.speicher.netzteil_speichern(ab.einstellung, ab.ergebnis, ab.punkte, ab.start_wann)
             self.verlauf_laden()
-        self.ergebnis.setText(ergebnis_html(ab.einstellung.__dict__, ab.ergebnis.als_dict()))
+        self._zeigen(ab.einstellung.__dict__, ab.ergebnis.als_dict())
         self.ergebnis.show()
         self.ergebnis_rahmen.show()
         self.f._zustand_zeigen()
@@ -641,6 +718,8 @@ class NetzteilReiter(QWidget):
             haelt = d["haelt"]
             wort, farbe = ({1: ("✔ hält", "#2e9e4f"), 0: ("✘ hält nicht", "#d03b3b")}
                            .get(haelt, ("– offen", None)))
+            if r.get("urteil") in URTEILE:
+                wort, farbe = URTEILE[r["urteil"]]
             strom = d["nenn_a"] or (d["nenn_w"] / d["nenn_v"] if d["nenn_v"] else 0)
             ee = d["einstellung"]
             angabe = f"{_kurz(d['nenn_v'])} V / {_kurz(round(strom, 2))} A"
@@ -655,7 +734,7 @@ class NetzteilReiter(QWidget):
                 angabe = f"{_kurz(d['nenn_v'])} V / unbekannt"
                 b = nt.bestleistung(r)
                 grenze = f"bis {zahl(b[0], 1)} W" if b else "–"
-                if haelt is None:
+                if haelt is None and r.get("urteil") not in URTEILE:
                     wort, farbe = "ermittelt", None
             elif r.get("abschalt_a") is not None:
                 grenze = f"{zahl(r['abschalt_a'], 2)} A"
@@ -685,7 +764,7 @@ class NetzteilReiter(QWidget):
         d = self._gewaehlt()
         if not d or self.laeuft:
             return
-        self.ergebnis.setText(ergebnis_html(d["einstellung"], d["ergebnis"]))
+        self._zeigen(d["einstellung"], d["ergebnis"])
         self.ergebnis.show()
         self.ergebnis_rahmen.show()
         k = d["kurve"]
@@ -699,6 +778,50 @@ class NetzteilReiter(QWidget):
             self.grenze.setValue(e["nenn_v"] * (1 - e["toleranz_proz"] / 100))
             self.grenze.show()
         self.bild.enableAutoRange()
+
+    def _zeigen(self, e: dict, r: dict) -> None:
+        self._angezeigt = (dict(e), dict(r))
+        self.ergebnis.setText(ergebnis_html(e, r))
+        self.knopf_pdf.setEnabled(True)
+        self.knopf_kabel.setEnabled(bool(r.get("widerstand_mohm")) and not e.get("kabel_mohm"))
+
+    def _kabel_uebernehmen(self) -> None:
+        e, r = getattr(self, "_angezeigt", ({}, {}))
+        if r.get("widerstand_mohm"):
+            self.kabel.setValue(r["widerstand_mohm"])
+            self.f.b.ereignis.emit("info", f"Kabelwert {r['widerstand_mohm']:.0f} mΩ übernommen – gilt ab der "
+                                           "nächsten Prüfung")
+
+    def bericht_speichern(self, pfad: str | None = None) -> str | None:
+        """Ergebnis als PDF: Urteil, Werte, Kennlinie und das Diagramm."""
+        from PySide6.QtCore import QMarginsF, QUrl
+        from PySide6.QtGui import QPageLayout, QPageSize, QPdfWriter, QTextDocument
+        from PySide6.QtWidgets import QFileDialog
+        e, r = getattr(self, "_angezeigt", (None, None))
+        if not e:
+            return None
+        if not pfad:
+            name = "".join(c if c.isalnum() or c in " -_" else "_" for c in e.get("name") or "Netzteil").strip()
+            pfad, _ = QFileDialog.getSaveFileName(self, "Bericht speichern",
+                                                  f"Prüfbericht {name} {datetime.now():%Y-%m-%d}.pdf", "PDF (*.pdf)")
+            if not pfad:
+                return None
+        bild = self.bild.grab().toImage()
+        doc = QTextDocument()
+        doc.addResource(QTextDocument.ImageResource, QUrl("kurve.png"), bild)
+        breite = 640
+        doc.setHtml(f"<h2>Prüfbericht Netzteil / Ladegerät</h2>"
+                    f"<p style='color:gray'>Gemessen mit Atorch DL24 · {datetime.now():%d.%m.%Y %H:%M}</p>"
+                    + ergebnis_html(e, r) +
+                    f"<p><img src='kurve.png' width='{breite}'></p>")
+        w = QPdfWriter(pfad)
+        w.setPageSize(QPageSize(QPageSize.A4))
+        w.setPageMargins(QMarginsF(15, 15, 15, 15), QPageLayout.Millimeter)
+        w.setResolution(110)
+        doc.setPageSize(w.pageLayout().paintRectPixels(w.resolution()).size().toSizeF())
+        doc.print_(w)
+        log.info("Bericht gespeichert: %s", pfad)
+        return pfad
 
     def loeschen(self) -> None:
         d = self._gewaehlt()
