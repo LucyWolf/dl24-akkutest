@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.0.37 – 16.11.2026
+
+Enthält alles aus 1.0.36 – deren Bau scheiterte an einem Test, sie ist nie
+erschienen.
+
+- **Akkuzustand der Powerbank:** gemessene Energie gegen den Neuwert am
+  Ausgang – aus der „Rated Capacity“ des Aufdrucks (neues Feld) oder, ohne
+  sie, geschätzt mit 82 % der Zellenergie (so rechnet Anker den
+  Wandlerverlust). Ampel: ab 80 % gut, ab 60 % gealtert, darunter stark
+  abgenutzt (Einschätzung der App, angelehnt an Handy-Akkus).
+- **Spannung beim Entladen:** Der Kapazitätstest bewertet die tiefste
+  Spannung bis kurz vor leer (ohne die letzte Minute).
+- **Vorlagen:** INIU MegaPower 20000 (B5) und Anker 325 PowerCore 20K
+  (A1268) mit Kapazität.
+- Restzeit-Schätzung des Kapazitätstests auf 80 % der Zellenergie angehoben
+  (vorher 65 % – zu pessimistisch).
+
 ## 1.0.36 – 16.11.2026
 
 - **Neuer Reiter „Powerbanks“:** Typenschild mit Kapazität (mAh oder Wh,

@@ -190,8 +190,18 @@ def ergebnis_html(e: dict, r: dict, fach: bool = False) -> str:
         if r.get("kap_mah_zelle"):
             text += f" · umgerechnet {zahl(r['kap_mah_zelle'], 0)} mAh bei {zahl(e.get('zell_v', 3.7), 1)} V"
         if r.get("kap_anteil") is not None:
-            z = nt.kap_ampel(r["kap_anteil"])
-            text += f" · <b style='color:{AMPEL[z]}'>{zahl(r['kap_anteil'], 0)} % vom Aufdruck</b>"
+            text += f" · {zahl(r['kap_anteil'], 0)} % vom Aufdruck"
+        if e.get("kapazitaet") and not r.get("kap_leer"):
+            pass
+        elif r.get("zustand_proz") is not None:
+            z = nt.kap_ampel(r["zustand_proz"])
+            wort = {"gruen": "gut", "gelb": "gealtert", "rot": "stark abgenutzt"}[z]
+            tab.append(("Akkuzustand", f"<b style='color:{AMPEL[z]}'>etwa {zahl(r['zustand_proz'], 0)} % – {wort}</b>"
+                                       + (" <span style='color:gray'>(Neuwert geschätzt)</span>"
+                                          if r.get("zustand_geschaetzt") else "")))
+        if r.get("kap_min_v") is not None:
+            tab.append(("Beim Entladen", f"tiefste Spannung {zahl(r['kap_min_v'], 3)} V "
+                                         "<span style='color:gray'>(ohne die letzte Minute)</span>"))
         if e.get("kapazitaet") and not r.get("kap_leer"):
             text += " <span style='color:gray'>(nicht bis leer gemessen)</span>"
         tab.append(("Abgegeben", text))
@@ -820,8 +830,8 @@ class NetzteilReiter(QWidget):
         for name, daten in self.f.speicher.vorlagen():
             if bool(daten.get("powerbank")) == self.powerbank:
                 self.vorlage.addItem(f"★ {name}", {"eigen": name, **daten})
-        for name, v, a in (nt.PB_VORLAGEN if self.powerbank else nt.VORLAGEN):
-            self.vorlage.addItem(nt.vorlage_text(name, v, a), (v, a, name))
+        for name, v, a, *extra in (nt.PB_VORLAGEN if self.powerbank else nt.VORLAGEN):
+            self.vorlage.addItem(nt.vorlage_text(name, v, a), (v, a, name, *extra))
         if auswaehlen:
             i = self.vorlage.findText(f"★ {auswaehlen}")
             self.vorlage.setCurrentIndex(max(0, i))
@@ -884,7 +894,7 @@ class NetzteilReiter(QWidget):
             self.name.setText(d["eigen"])
         elif d:
             self.schnell.setChecked(False)
-            v, a, name = d
+            v, a, name = d[:3]
             self.unbekannt.setChecked(False)
             self.nenn_v.setValue(v)
             self.nenn_a.setValue(a)
@@ -1478,8 +1488,8 @@ class NetzteilReiter(QWidget):
                 if haelt is None and r.get("urteil") not in URTEILE:
                     wort, farbe = "ermittelt", None
             elif ee.get("powerbank") and r.get("energie_wh"):
-                grenze = f"{zahl(r['energie_wh'], 1)} Wh" + (f" ({zahl(r['kap_anteil'], 0)} %)"
-                                                            if r.get("kap_anteil") is not None else "")
+                grenze = f"{zahl(r['energie_wh'], 1)} Wh" + (f" · Zustand {zahl(r['zustand_proz'], 0)} %"
+                                                            if r.get("zustand_proz") is not None else "")
             elif r.get("abschalt_a") is not None:
                 grenze = f"{zahl(r['abschalt_a'], 2)} A"
             elif ee.get("abschalttest"):

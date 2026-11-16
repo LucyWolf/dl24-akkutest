@@ -36,6 +36,12 @@ class PowerbankReiter(NetzteilReiter):
         self.wh = self._zahlfeld(0, 400, 1, 1, " Wh", "aus mAh rechnen")
         self.wh.setToolTip("Steht die Energie in Wh drauf, ist sie genauer als mAh")
         f.insertRow(zeile + 2, "Energie:", self.wh)
+        self.nenn_mah_aus = self._zahlfeld(0, 60000, 0, 500, " mAh bei 5 V", "nicht angegeben")
+        self.nenn_mah_aus.setToolTip("Steht auf vielen Powerbanks klein als „Rated Capacity“, z. B. „12000 mAh "
+                                     "(5 V ⎓ 2,1 A)“: so viel liefert sie neu am Ausgang. Damit wird der "
+                                     "Akkuzustand genau – sonst wird er aus der Zellenergie geschätzt.")
+        f.insertRow(zeile + 3, "Nennkapazität Ausgang:", self.nenn_mah_aus)
+        zeile += 1
         self.mindest_a = self._zahlfeld(0.05, 2.0, 2, 0.05, " A")
         self.mindest_a.setValue(0.3)
         self.mindest_a.setToolTip("Darunter schalten sich viele Powerbanks nach einiger Zeit von selbst ab. "
@@ -52,15 +58,15 @@ class PowerbankReiter(NetzteilReiter):
         k.addWidget(self.mit_kap, 0, 0)
         k.addWidget(self.kap_a, 0, 1)
         hinweis = QLabel("Die Powerbank vorher <b>ganz voll laden</b>. Danach ist sie leer – ein Abschalttest "
-                         "entfällt dann. Üblich sind 60–75 % der aufgedruckten Energie, weil beim Umwandeln auf "
-                         "5 V Energie verloren geht.")
+                         "entfällt dann. Daraus ergibt sich der Akkuzustand: wie viel sie noch "
+                         "von dem kann, was sie neu konnte (ab 80 % gut).")
         hinweis.setWordWrap(True)
         hinweis.setStyleSheet(gedaempft())
         k.addWidget(hinweis, 1, 0, 1, 2)
         self._links.insertWidget(self._links.indexOf(self.tests_gruppe), g)
         self.kap_gruppe = g
         self.mit_dauer.setChecked(False)
-        for w in (self.mah, self.zell_v, self.wh, self.mindest_a, self.kap_a):
+        for w in (self.mah, self.zell_v, self.wh, self.mindest_a, self.kap_a, self.nenn_mah_aus):
             w.valueChanged.connect(self._angabe_zeigen)
         self.mit_kap.toggled.connect(self._kap_umschalten)
         self._breite_anpassen()               # neue Felder: sonst schneidet die linke Spalte ab
@@ -74,7 +80,7 @@ class PowerbankReiter(NetzteilReiter):
     def _felder_sperren(self) -> None:
         super()._felder_sperren()
         if hasattr(self, "mah"):
-            for w in (self.mah, self.zell_v, self.wh, self.mindest_a):
+            for w in (self.mah, self.zell_v, self.wh, self.nenn_mah_aus, self.mindest_a):
                 w.setEnabled(not self.laeuft)
             self.kap_gruppe.setEnabled(not self.laeuft and self.bereit())
 
@@ -84,17 +90,20 @@ class PowerbankReiter(NetzteilReiter):
     def _typenschild(self) -> dict:
         d = super()._typenschild()
         d.update(powerbank=True, mah=self.mah.value(), zell_v=self.zell_v.value(), wh=self.wh.value(),
-                 mindest_a=self.mindest_a.value())
+                 mindest_a=self.mindest_a.value(), nenn_mah_aus=self.nenn_mah_aus.value())
         return d
 
     def _vorlage(self, _=None) -> None:
         super()._vorlage(_)
         d = self.vorlage.currentData()
+        if isinstance(d, tuple) and len(d) > 3 and hasattr(self, "mah"):
+            d = d[3]                          # bekanntes Modell: Kapazität gleich mit
         if isinstance(d, dict) and hasattr(self, "mah"):
             self.mah.setValue(d.get("mah", 0))
             self.zell_v.setValue(d.get("zell_v", 3.7))
             self.wh.setValue(d.get("wh", 0))
             self.mindest_a.setValue(d.get("mindest_a", 0.3))
+            self.nenn_mah_aus.setValue(d.get("nenn_mah_aus", 0))
 
     def einstellung(self) -> nt.NetzteilEinstellung:
         e = super().einstellung()
@@ -104,7 +113,8 @@ class PowerbankReiter(NetzteilReiter):
         return dataclasses.replace(e, name=name, powerbank=True, hub=False, toleranz_proz=5.0,
                                    mah=self.mah.value(), zell_v=round(self.zell_v.value(), 2),
                                    wh=round(self.wh.value(), 1), mindest_a=round(self.mindest_a.value(), 2),
-                                   kapazitaet=self.mit_kap.isChecked(), kap_a=round(self.kap_a.value(), 2))
+                                   kapazitaet=self.mit_kap.isChecked(), kap_a=round(self.kap_a.value(), 2),
+                                   nenn_mah_aus=self.nenn_mah_aus.value())
 
     def bereit(self) -> bool:
         return self.nenn_v.value() > 0 and self.nenn_a.value() > 0
@@ -115,9 +125,11 @@ class PowerbankReiter(NetzteilReiter):
             return
         e = self.einstellung()
         teile = [self.angabe_hinweis.text()] if self.angabe_hinweis.text() else []
-        if e.aufdruck_wh > 0:
-            teile.append(f"Aufdruck: {zahl(e.aufdruck_wh, 1)} Wh – üblich kommen davon etwa "
-                         f"{zahl(e.aufdruck_wh * 0.6, 1)}–{zahl(e.aufdruck_wh * 0.75, 1)} Wh heraus")
+        neu, geschaetzt = e.neu_wh
+        if neu > 0:
+            teile.append(f"Neu am Ausgang: {'etwa ' if geschaetzt else ''}{zahl(neu, 1)} Wh"
+                         + (f" ({zahl(nt.PB_WIRKUNG * 100, 0)} % von {zahl(e.aufdruck_wh, 1)} Wh – Wandlerverlust)"
+                            if geschaetzt else ""))
         elif e.kapazitaet:
             teile.append("Ohne Kapazitätsangabe wird nur gemessen, nicht verglichen")
         self.angabe_hinweis.setText(".  ".join(teile))

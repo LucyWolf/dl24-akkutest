@@ -31,11 +31,19 @@ ZUSAMMENBRUCH = 0.5       # unter 50 % der Nennspannung gilt das Netzteil als au
 # Powerbanks
 PB_WARTEN_S = 90.0        # so lange auf Spannung warten (Knopf an der Powerbank drücken)
 PB_KAP_MAX_S = 48 * 3600  # Kapazitätstest endet spätestens nach 48 h
-PB_ERWARTUNG = 0.65       # für die Restzeit-Schätzung: so viel der Aufdruck-Energie kommt meist an
-PB_GRUEN = 60.0           # Einschätzung der App (keine Vorgabe): ab so viel % der Aufdruck-Energie grün
-PB_GELB = 45.0            # darunter rot - die Angabe ist stark übertrieben
+# Neu kommt am Ausgang etwa 82 % der Zellenergie an (Wandlerverlust) - so rechnet Anker die
+# "Rated capacity" auf dem Aufdruck (service.anker.com: "Why Is the Rated Capacity ... Lower").
+PB_WIRKUNG = 0.82
+PB_ERWARTUNG = 0.8        # für die Restzeit-Schätzung: so viel der Aufdruck-Energie kommt meist an
+# Akkuzustand (gemessen gegen neu) - Einschätzung der App, keine Vorgabe. Wie bei Handy-Akkus
+# gilt ab etwa 80 % als verbraucht.
+PB_ZUSTAND_GRUEN = 80.0
+PB_ZUSTAND_GELB = 60.0
 PB_AUTOAUS_S = 180.0      # geht sie im Kapazitätstest früher aus, war es vielleicht die Abschaltautomatik
 PB_VORLAGEN = [
+    # bekannte Modelle: Daten vom Hersteller (Aufdruck am Gerät geht vor)
+    ("INIU MegaPower 20000 (B5), USB-C", 5.0, 3.0, {"mah": 20000, "zell_v": 3.7, "wh": 74.0}),
+    ("Anker 325 PowerCore 20K (A1268), USB-A", 5.0, 2.4, {"mah": 20000, "zell_v": 3.7, "wh": 0.0}),
     ("Powerbank 5 W", 5.0, 1.0),
     ("Powerbank 10 W", 5.0, 2.0),
     ("Powerbank 12 W", 5.0, 2.4),
@@ -101,6 +109,16 @@ class NetzteilEinstellung:
     mindest_a: float = 0.3    # darunter schalten sich viele Powerbanks von selbst ab
     kapazitaet: bool = False  # bis leer entladen und Energie messen
     kap_a: float = 1.0
+    nenn_mah_aus: float = 0.0  # "Rated capacity" vom Aufdruck: was neu am Ausgang (5 V) herauskommt
+
+    @property
+    def neu_wh(self) -> tuple[float, bool]:
+        """Was die Powerbank neu am Ausgang liefern sollte - und ob das nur geschätzt ist."""
+        if self.nenn_mah_aus > 0:
+            return self.nenn_mah_aus * self.nenn_v / 1000, False
+        if self.aufdruck_wh > 0:
+            return self.aufdruck_wh * PB_WIRKUNG, True
+        return 0.0, True
 
     @property
     def aufdruck_wh(self) -> float:
@@ -303,6 +321,9 @@ class NetzteilErgebnis:
     kap_anteil: float | None = None        # % der Aufdruck-Energie
     kap_mah_zelle: float | None = None     # abgegebene Energie umgerechnet auf die Zellspannung
     autoaus: bool = False                  # womöglich die Abschaltautomatik statt leer
+    zustand_proz: float | None = None      # Akkuzustand: gemessen gegen neu
+    zustand_geschaetzt: bool = False       # ohne "Rated capacity" aus der Zellenergie geschätzt
+    kap_min_v: float | None = None         # tiefste Spannung beim Entladen (ohne die letzte Minute)
 
     def als_dict(self) -> dict:
         d = dict(self.__dict__)
@@ -514,24 +535,38 @@ def bewerten(e: NetzteilEinstellung, r: NetzteilErgebnis) -> None:
         r.kap_anteil = r.kap_mah_zelle = None
         if r.energie_wh > 0 and e.zell_v > 0:
             r.kap_mah_zelle = round(r.energie_wh / e.zell_v * 1000)
+        r.zustand_proz, r.zustand_geschaetzt = None, False
         if e.kapazitaet and r.kap_leer and e.aufdruck_wh > 0:
             r.kap_anteil = round(r.energie_wh / e.aufdruck_wh * 100, 1)
-            z = kap_ampel(r.kap_anteil)
+        neu, geschaetzt = e.neu_wh
+        if e.kapazitaet and r.kap_leer and neu > 0:
+            r.zustand_proz = round(r.energie_wh / neu * 100)
+            r.zustand_geschaetzt = geschaetzt
+            z = kap_ampel(r.zustand_proz)
+            text = (f"Akkuzustand etwa {_k(r.zustand_proz, 0)} %: {_k(r.energie_wh, 1)} Wh gemessen, neu "
+                    f"{'etwa ' if geschaetzt else ''}{_k(neu, 1)} Wh am Ausgang"
+                    + (f" ({_k(PB_WIRKUNG * 100, 0)} % von {_k(e.aufdruck_wh, 1)} Wh laut Aufdruck – geschätzt)"
+                       if geschaetzt else f" (laut Aufdruck {_k(e.nenn_mah_aus, 0)} mAh bei {_k(e.nenn_v, None)} V)"))
             if z == "rot":
                 schlimm = True
                 r.verspricht = False
-                gruende.append(f"Liefert nur {_k(r.energie_wh, 1)} Wh von {_k(e.aufdruck_wh, 1)} Wh laut Aufdruck "
-                               f"({_k(r.kap_anteil, 0)} %) – Angabe stark übertrieben (unter {_k(PB_GELB, 0)} %, "
-                               "Einschätzung der App)")
+                gruende.append(text + f" – stark abgenutzt oder Angabe falsch (unter {_k(PB_ZUSTAND_GELB, 0)} %, "
+                                      "Einschätzung der App)")
             elif z == "gelb":
                 knapp = True
-                gruende.append(f"Liefert {_k(r.energie_wh, 1)} Wh von {_k(e.aufdruck_wh, 1)} Wh laut Aufdruck "
-                               f"({_k(r.kap_anteil, 0)} %) – weniger als üblich (unter {_k(PB_GRUEN, 0)} %, "
-                               "Einschätzung der App)")
+                gruende.append(text + f" – gealtert (unter {_k(PB_ZUSTAND_GRUEN, 0)} %, Einschätzung der App)")
             else:
                 pb_gut = True
-                gruende.append(f"Liefert {_k(r.energie_wh, 1)} Wh von {_k(e.aufdruck_wh, 1)} Wh laut Aufdruck "
-                               f"({_k(r.kap_anteil, 0)} %) – im üblichen Bereich")
+                gruende.append(text + " – gut")
+        # Hält sie die Spannung beim Entladen? Die letzte Minute vor dem Abschalten zählt nicht
+        if e.kapazitaet and r.kap_min_v is not None:
+            rot_u, gelb_u, _, _ = e.grenzen()
+            if r.kap_min_v < rot_u:
+                schlimm = True
+                gruende.append(f"Beim Entladen fiel die Spannung auf {_k(r.kap_min_v)} V – unter {_k(rot_u)} V")
+            elif r.kap_min_v < gelb_u:
+                knapp = True
+                gruende.append(f"Beim Entladen fiel die Spannung auf {_k(r.kap_min_v)} V – unter {_k(gelb_u)} V")
         if e.kapazitaet and r.autoaus:
             gruende.append(f"Nach nur {dauer_kurz(r.kap_s)} aus – leer oder Abschaltautomatik?")
     if schlimm:
@@ -552,8 +587,9 @@ def bewerten(e: NetzteilEinstellung, r: NetzteilErgebnis) -> None:
     r.laien = laien_saetze(e, r, tiefst) + pb_saetze(e, r)
 
 
-def kap_ampel(anteil: float) -> str:
-    return "gruen" if anteil >= PB_GRUEN else "gelb" if anteil >= PB_GELB else "rot"
+def kap_ampel(zustand: float) -> str:
+    """Ampel für den Akkuzustand in % (gemessen gegen neu)."""
+    return "gruen" if zustand >= PB_ZUSTAND_GRUEN else "gelb" if zustand >= PB_ZUSTAND_GELB else "rot"
 
 
 def dauer_kurz(s: float) -> str:
@@ -576,25 +612,40 @@ def pb_saetze(e: NetzteilEinstellung, r: NetzteilErgebnis) -> list[str]:
                      "leer – die Kapazität ist daher nicht vollständig gemessen.")
         return s
     zelle = f"{_k(r.kap_mah_zelle, 0)} mAh" if r.kap_mah_zelle else "–"
-    if e.aufdruck_wh > 0 and r.kap_anteil is not None:
+    if r.zustand_proz is not None:
+        neu, geschaetzt = e.neu_wh
         auf = f"{_k(e.mah, 0)} mAh" if e.mah else f"{_k(e.aufdruck_wh, 1)} Wh"
-        s.append(f"Auf der Powerbank stehen {auf} ({_k(e.aufdruck_wh, 1)} Wattstunden). Herausgekommen sind "
-                 f"{_k(r.energie_wh, 1)} Wattstunden – das sind {_k(r.kap_anteil, 0)} % (umgerechnet {zelle} "
-                 f"bei {_k(e.zell_v, 1)} V).")
-        z = kap_ampel(r.kap_anteil)
+        s.append(f"Herausgekommen sind {_k(r.energie_wh, 1)} Wattstunden (umgerechnet {zelle} bei "
+                 f"{_k(e.zell_v, 1)} V; auf der Powerbank stehen {auf}).")
+        s.append(f"Neu sollte sie am Ausgang {'etwa ' if geschaetzt else ''}{_k(neu, 1)} Wattstunden liefern. "
+                 f"Sie kann also noch etwa {_k(r.zustand_proz, 0)} % von dem, was sie neu konnte "
+                 f"(Akkuzustand).")
+        if geschaetzt:
+            s.append(f"Der Neuwert ist geschätzt: Beim Umwandeln der Akkuspannung auf 5 Volt gehen auch bei neuen "
+                     f"Powerbanks rund {_k(100 - PB_WIRKUNG * 100, 0)} % verloren. Steht auf dem Aufdruck eine "
+                     "„Rated Capacity“ (z. B. 12000 mAh bei 5 V), wird es genauer.")
+        z = kap_ampel(r.zustand_proz)
         if z == "gruen":
-            s.append("Das ist normal: Beim Umwandeln der Akkuspannung auf 5 Volt gehen immer etwa 20–40 % "
-                     "verloren.")
+            s.append("Das ist gut – die Powerbank ist kaum oder gar nicht abgenutzt.")
         elif z == "gelb":
-            s.append("Das ist weniger als üblich. Der Akku ist vielleicht gealtert, oder die Angabe ist etwas "
-                     "geschönt.")
+            s.append("Die Powerbank ist gealtert: Sie hält spürbar weniger als neu, ist aber noch brauchbar.")
+        elif r.zustand_proz >= 40:
+            s.append("Die Powerbank ist stark abgenutzt und sollte ersetzt werden.")
         else:
-            s.append("Das ist viel zu wenig. Die Angabe auf der Powerbank stimmt nicht – das ist typisch für "
-                     "gefälschte oder sehr billige Powerbanks.")
+            s.append("Das ist viel zu wenig – entweder ist der Akku kaputt, oder die Angabe auf der Powerbank "
+                     "stimmt nicht (typisch für gefälschte oder sehr billige Powerbanks).")
     else:
         s.append(f"Die Powerbank gab {_k(r.energie_wh, 1)} Wattstunden ab ({_k(r.ladung_mah, 0)} mAh bei "
                  f"{_k(e.nenn_v, None)} V, umgerechnet {zelle} bei {_k(e.zell_v, 1)} V). Ohne Angabe auf der "
                  "Powerbank lässt sich nicht vergleichen.")
+    if r.kap_min_v is not None:
+        rot_u, gelb_u, _, _ = e.grenzen()
+        if r.kap_min_v >= gelb_u:
+            s.append(f"Die Spannung blieb beim Entladen bis kurz vor leer im erlaubten Bereich (tiefster Wert "
+                     f"{_k(r.kap_min_v)} Volt).")
+        else:
+            s.append(f"Beim Entladen fiel die Spannung schon vor dem Ende auf {_k(r.kap_min_v)} Volt – unter "
+                     f"{_k(gelb_u)} Volt. Angeschlossene Geräte laden dann langsamer oder brechen ab.")
     handy = r.energie_wh / 15 if r.energie_wh else 0
     if handy >= 0.5:
         s.append(f"Zum Vergleich: Ein Handy-Akku hat etwa 15 Wattstunden – das reicht also für etwa "
@@ -715,6 +766,7 @@ class NetzteilAblauf:
         self._aus = 0
         self._zu_wenig = 0
         self._pb_seit: float | None = None
+        self._kap_ab = 0
         self._letzt: Messwert | None = None
         self.steuerbar = bool(self.geraet and self.geraet.kann_steuern)
 
@@ -861,6 +913,8 @@ class NetzteilAblauf:
             self._fertig()
             return
         self._schritt_t0 = m.zeit
+        if s.art == "kapazitaet":
+            self._kap_ab = len(self.punkte)
         art = {"stufe": "", "dauer": "Dauer ", "abschalt": "↑ ", "kapazitaet": "Kapazität "}[s.art]
         self.ergebnis.marken.append((round(m.zeit - (self._t0 or m.zeit), 1),
                                      f"{art}{_k(s.soll_a, 2)} A".replace(".", ",")))
@@ -910,6 +964,12 @@ class NetzteilAblauf:
         if (self._aus >= 2 or self._zu_wenig >= 3) and s.art == "kapazitaet":
             self._last_aus()
             r.kap_s = round(im_schritt, 1)
+            # tiefste Spannung beim Entladen - ohne Einschwingen und ohne die letzte Minute vor dem Aus
+            ende = self.punkte[-1][0] - 60
+            anfang = self.punkte[self._kap_ab][0] if len(self.punkte) > self._kap_ab else ende
+            kap = [p for p in self.punkte[self._kap_ab:]
+                   if anfang + EINSCHWINGEN_S <= p[0] <= ende and p[2] > 0.01]
+            r.kap_min_v = round(min(p[1] for p in kap), 3) if kap else None
             r.kap_leer = True
             r.autoaus = im_schritt < PB_AUTOAUS_S
             self._fertig(f"Powerbank leer: nach {dauer_kurz(r.kap_s)} abgeschaltet")

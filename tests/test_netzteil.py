@@ -268,13 +268,22 @@ def test_powerbank_kapazitaet():
     assert r.kap_leer and not r.autoaus and "leer" in r.grund
     assert 1.55 < r.energie_wh < 1.8, r.energie_wh
     assert 300 < r.ladung_mah < 370, r.ladung_mah
+    # neu: 2,22 Wh × 82 % = 1,82 Wh am Ausgang → Zustand rund 93 %
     assert 70 < r.kap_anteil < 81 and r.urteil == "gut", (r.kap_anteil, r.urteil, r.gruende)
-    assert any("normal" in s for s in r.laien) and any("Wattstunden" in s for s in r.laien)
+    assert 88 <= r.zustand_proz <= 98 and r.zustand_geschaetzt, r.zustand_proz
+    assert any("Akkuzustand" in s for s in r.laien) and any("geschätzt" in s for s in r.laien), r.laien
+    assert r.kap_min_v and r.kap_min_v > 4.75 and any("bis kurz vor leer" in s for s in r.laien)
+    # mit "Rated capacity" vom Aufdruck: genau statt geschätzt; 450 mAh × 5 V = 2,25 Wh → gealtert
+    e2 = pb(stufentest=False, kapazitaet=True, kap_a=1.0, mah=600, nenn_mah_aus=450)
+    r2 = nt.NetzteilErgebnis(energie_wh=r.energie_wh, kap_leer=True, kap_s=1200, leerlauf_v=5.0)
+    nt.bewerten(e2, r2)
+    assert not r2.zustand_geschaetzt and 70 <= r2.zustand_proz < 80 and r2.urteil == "eingeschraenkt", r2.gruende
+    assert any("gealtert" in s for s in r2.laien)
     # gefälscht: 2000 mAh drauf, 2 Wh drin
     q = SimPowerbank(wh=2.0)
     r = durchspielen(q, pb(stufentest=False, kapazitaet=True, kap_a=1.0, mah=2000), frist=60)[0].ergebnis
     print("Fälschung:", r.kap_anteil, r.urteil)
-    assert r.kap_anteil < 30 and r.urteil == "nicht" and r.verspricht is False
+    assert r.kap_anteil < 30 and r.zustand_proz < 40 and r.urteil == "nicht" and r.verspricht is False
     assert any("stimmt nicht" in s for s in r.laien)
 
 

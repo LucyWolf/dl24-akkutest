@@ -472,6 +472,14 @@ def test_powerbank_im_fenster():
     f.anschluss.setCurrentIndex(f.anschluss.findText("Simulator – Powerbank", flags=fenster.Qt.MatchStartsWith))
     f.verbinden_umschalten()
     assert warten(lambda: f.geraet is not None and f.letzter is not None), meldungen
+    # bekannte Modelle bringen die Kapazität gleich mit
+    pb.vorlage.setCurrentIndex(pb.vorlage.findText("INIU MegaPower", flags=fenster.Qt.MatchStartsWith))
+    pb._vorlage()
+    assert pb.nenn_a.value() == 3.0 and pb.mah.value() == 20000 and pb.wh.value() == 74
+    assert pb.einstellung().name.startswith("INIU") and pb.einstellung().aufdruck_wh == 74
+    pb.vorlage.setCurrentIndex(pb.vorlage.findText("Anker 325", flags=fenster.Qt.MatchStartsWith))
+    pb._vorlage()
+    assert pb.nenn_a.value() == 2.4 and pb.mah.value() == 20000 and pb.wh.value() == 0
     pb.vorlage.setCurrentIndex(pb.vorlage.findText("Powerbank 10 W", flags=fenster.Qt.MatchStartsWith))
     pb._vorlage()
     assert pb.nenn_a.value() == 2.0 and pb.knopf_start.isEnabled()
@@ -491,12 +499,13 @@ def test_powerbank_im_fenster():
     assert pb.laeuft and not f.nt.knopf_start.isEnabled() and not f.knopf_start.isEnabled()
     assert warten(lambda: "Kapazitätstest" in pb.schritt.text(), 30), pb.schritt.text()
     foto(f, "14-powerbank-laeuft")
-    assert warten(lambda: not pb.laeuft, 90), pb.ablauf.zustand
+    # "fertig" kommt im Gerätefaden - das Fenster zeigt es erst einen Moment später
+    assert warten(lambda: not pb.laeuft and pb.ergebnis.isVisible() and pb.ergebnis.text(), 90), pb.ablauf.zustand
     r = pb.ablauf.ergebnis
     print("Powerbank:", r.grund, r.energie_wh, r.kap_anteil, r.urteil)
     assert r.kap_leer and r.urteil == "gut"
     text = pb.ergebnis.text()
-    assert "Abgegeben" in text and "vom Aufdruck" in text and "600 mAh" in text, text
+    assert "Abgegeben" in text and "vom Aufdruck" in text and "600 mAh" in text and "Akkuzustand" in text, text
     from PySide6.QtWidgets import QTextBrowser
     gross = pb._fenster.findChild(QTextBrowser).toPlainText()
     assert "Kurz gesagt" in gross and "Wattstunden" in gross and "nie weniger als 0,30 Ampere" in gross, gross
