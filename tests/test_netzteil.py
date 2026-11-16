@@ -174,41 +174,32 @@ def test_unbekannter_strom_ohne_trigger():
 
 
 def test_urteil_mit_und_ohne_kabel():
-    # wie Lucys Hub: gleichmäßig 0,34 Ω - bei 2 A kommen am Kabelende nur 4,37 V an
-    def hub(kabel):
-        q = SimNetzteil(5.0, innen_mohm=340, abschalt_a=9)
+    # wie Lucys Hub: gleichmäßig 0,34 Ω - bei 2 A kommen am Kabelende nur 4,32 V an.
+    # Das Kabel wird nicht herausgerechnet: bewertet wird, was beim Gerät ankommt.
+    def hub(kabel, innen=340):
+        q = SimNetzteil(5.0, innen_mohm=innen, abschalt_a=9)
         e = nt.NetzteilEinstellung("Hub", 5.0, 2.0, stufen=5, stufe_s=10, dauertest=False, kabel_mohm=kabel,
                                    hub=True)
         return durchspielen(q, e)[0].ergebnis
     ohne = hub(0)
     print("Hub ohne Kabelwert:", ohne.urteil, ohne.widerstand_mohm, ohne.laien)
-    # am Kabelende zu wenig - aber ohne Kabelwert nicht entscheidbar
-    assert ohne.urteil == "offen" and ohne.verspricht is True and not ohne.spez_verletzt
+    assert ohne.urteil == "nicht" and ohne.spez_verletzt and ohne.verspricht is True
     assert 320 <= ohne.widerstand_mohm <= 360
-    assert any("nicht sagen" in t for t in ohne.laien) and any("Kabelwert" in t for t in ohne.laien)
-    kreis = hub(330)                        # erklärt fast alles - Hinweis
-    assert kreis.kabel_kreis and any("im Kreis gerechnet" in t for t in kreis.laien)
-    mit = hub(300)                          # Kabel + Adapter herausgerechnet
-    print("Hub mit Kabelwert:", mit.urteil, mit.gruende, mit.stufen[-1].buchse_v)
-    assert mit.urteil == "gut" and mit.stufen[-1].buchse_v > 4.9
-    knapp = hub(150)                        # Buchse 4,67 V: unter 4,75 V, über 4,40 V
+    mit = hub(300)
+    # gleiches Urteil wie ohne Kabelwert - nur ein Hinweis, wie viel aufs Kabel geht
+    assert mit.urteil == ohne.urteil and mit.stufen[-1].buchse_v is None
+    assert not mit.kabel_kreis and not mit.kabel_unplausibel
+    assert any("auf das Kabel" in g for g in mit.gruende), mit.gruende
+    knapp = hub(0, innen=220)               # rund 4,6 V: unter 4,75 V, über 4,40 V
     assert knapp.urteil == "eingeschraenkt" and knapp.spez_verletzt, (knapp.urteil, knapp.gruende)
     assert any("entspricht damit nicht den Vorgaben" in t for t in knapp.laien), knapp.laien
-    # ab welcher Last unterschritten - und dass es keine stabile Spannung mehr hält
     assert knapp.unter_ab_a is not None and knapp.unter_ab_a <= 2.0
     assert any("Mindestwert wurde unterschritten" in t and "keine stabile Spannung" in t for t in knapp.laien), \
         knapp.laien
-    assert any("Ob das am Gerät oder am Kabel liegt" in t for t in ohne.laien), ohne.laien
     assert any("einzelner Port des Hubs" in t and "10 Watt" in t for t in ohne.laien), ohne.laien
-    # Kabelwert am Hub selbst "gemessen" (so groß wie alles) - nicht herausrechnen, kein Urteil
-    falsch = hub(420)
-    assert falsch.kabel_unplausibel and falsch.urteil == "offen", (falsch.urteil, falsch.gruende)
-    assert any("nicht herausgerechnet" in t for t in falsch.laien)
     assert any("§7.2.2" in g for g in knapp.gruende)
-    tief = SimNetzteil(5.0, innen_mohm=600, abschalt_a=9)
-    e = nt.NetzteilEinstellung("Mies", 5.0, 2.0, stufen=2, stufe_s=10, dauertest=False, kabel_mohm=100)
-    mies = durchspielen(tief, e)[0].ergebnis      # Buchse 3,85 + 0,2 = 4,05 V
-    assert mies.urteil == "nicht" and mies.spez_verletzt
+    gut = hub(0, innen=60)
+    assert gut.urteil == "gut", (gut.urteil, gut.gruende)
 
 
 def test_zu_hohe_spannung():

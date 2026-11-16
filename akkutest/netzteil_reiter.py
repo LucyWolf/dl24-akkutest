@@ -99,8 +99,8 @@ def messaufbau_html(e: dict, r: dict) -> str:
         wann = e.get("kabel_wann")
         woher = (f"gemessen am {datetime.fromtimestamp(wann):%d.%m.%Y um %H:%M} Uhr an einem guten Ladegerät"
                  if wann else "von Hand eingetragen")
-        zeilen.append(("Widerstand Kabel + Adapter", f"{k:.0f} mΩ ({woher}) – herausgerechnet: Die Bewertung gilt "
-                                                     "für die Spannung an der Buchse des Geräts"))
+        zeilen.append(("Widerstand Kabel + Adapter", f"{k:.0f} mΩ ({woher}) – nicht herausgerechnet: bewertet "
+                                                     "wird die Spannung am Kabelende, also beim Gerät"))
     elif k:
         zeilen.append(("Widerstand Kabel + Adapter", f"{k:.0f} mΩ eingetragen, aber unplausibel (größer als der "
                                                      "gesamte gemessene Widerstand) – nicht herausgerechnet"))
@@ -1124,19 +1124,11 @@ class NetzteilReiter(QWidget):
             b.show()
         self.grenze.setValue(gelb_u)
         self.grenze.show()
-        self._kabel_ohm = e.kabel_mohm / 1000
+        self._kabel_ohm = 0.0   # Grenzen fest - nichts ans Kabelende umrechnen
         self._gelb_u, self._rot_u = gelb_u, rot_u
         self.bild.setLabel("left", "Spannung (V)")
         self.legende.removeItem(self.linie_b)
         self.legende.removeItem(self.linie_r)
-        if e.kabel_mohm:
-            # Bänder gelten an der Buchse - am Kabelende verschieben sie sich mit dem Strom.
-            # Statt Bändern die umgerechneten Grenzlinien.
-            for b in self.baender:
-                b.hide()
-            self.grenze.hide()
-            self.legende.addItem(self.linie_b, f"Mindestwert {zahl(gelb_u)} V, ans Kabelende umgerechnet")
-            self.legende.addItem(self.linie_r, f"Untergrenze {zahl(rot_u)} V, ans Kabelende umgerechnet")
 
     def _kurven(self, punkte: list) -> None:
         """Alle Streifen aus den Punkten (s, V, A, °C oder None)."""
@@ -1470,11 +1462,10 @@ class NetzteilReiter(QWidget):
             + "".join((f"<p><b>Diagramm {titel}</b></p>" if titel else "") +
                       f"<p><img src='kurve{i}.png' width='{breite}'></p>"
                       for i, (titel, _) in enumerate(getattr(self, "_bilder", []))) +
-            "<p style='color:gray'>Oben: gemessene Spannung (blau). Ohne Kabelwert mit Farbbereichen – "
+            "<p style='color:gray'>Oben: gemessene Spannung (blau) mit festen Farbbereichen – "
             "<span style='color:#2e9e4f'>grün</span> = in Ordnung, <span style='color:#c77700'>gelb</span> = außerhalb "
-            "der Vorgabe, aber nutzbar, <span style='color:#d03b3b'>rot</span> = zu niedrig bzw. zu hoch; mit Kabelwert "
-            "mit gestrichelten Grenzlinien, ans Kabelende umgerechnet – liegt die blaue Kurve darüber, reicht das "
-            "Gerät. Mitte: Strom und Leistung. Unten: Temperatur, wenn ein Fühler angebracht war.</p>"
+            "der Vorgabe, aber nutzbar, <span style='color:#d03b3b'>rot</span> = zu niedrig bzw. zu hoch. Gemessen "
+            "am Kabelende, also so, wie es beim Gerät ankommt. Mitte: Strom und Leistung. Unten: Temperatur, wenn ein Fühler angebracht war.</p>"
             f"<h3>Messwerte für Fachleute</h3>{ergebnis_html(e, r, fach=True)}"
             "<p style='color:gray'><b>Schwankung</b> = Unterschied zwischen höchstem und tiefstem Wert innerhalb "
             "einer Stufe. Grün bis 1 %, gelb bis 3 %, rot darüber – das ist eine Einschätzung dieser Software, keine "

@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.33 – 16.11.2026
+
+- **Feste Grenzlinien:** Die Grenzen im Spannungsdiagramm bleiben immer
+  gerade (4,75 V / 4,40 V bei USB). Mit eingetragenem Kabelwert waren sie
+  vorher ans Kabelende umgerechnet und rutschten mit jeder Stromstufe nach
+  unten – das sah aus, als wandere der Wert.
+- **Kabel wird nicht mehr herausgerechnet:** Bewertet wird, was am Kabelende
+  beim Gerät ankommt. Diagramm und Urteil passen damit immer zusammen; ohne
+  Kabelwert gibt es kein „nicht entscheidbar“ mehr. Der Kabelwert steht im
+  Bericht, das Kabel wird weiter eigens bewertet, und bei zu niedriger
+  Spannung steht dabei, wie viel davon aufs Kabel entfällt.
+
 ## 1.0.32 – 16.11.2026
 
 - **Bericht mit allen Diagrammen:** Bei Schnellladegeräten steht für jede
