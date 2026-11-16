@@ -186,6 +186,8 @@ def test_urteil_mit_und_ohne_kabel():
     assert ohne.urteil == "offen" and ohne.verspricht is True and not ohne.spez_verletzt
     assert 320 <= ohne.widerstand_mohm <= 360
     assert any("nicht sagen" in t for t in ohne.laien) and any("Kabelwert" in t for t in ohne.laien)
+    kreis = hub(330)                        # erklärt fast alles - Hinweis
+    assert kreis.kabel_kreis and any("im Kreis gerechnet" in t for t in kreis.laien)
     mit = hub(300)                          # Kabel + Adapter herausgerechnet
     print("Hub mit Kabelwert:", mit.urteil, mit.gruende, mit.stufen[-1].buchse_v)
     assert mit.urteil == "gut" and mit.stufen[-1].buchse_v > 4.9
@@ -250,6 +252,17 @@ def test_unruhige_spannung():
                          nt.NetzteilEinstellung("Ruhig", 5.0, 1.0, stufen=2, stufe_s=20, dauertest=False,
                                                 kabel_mohm=60))[0].ergebnis
     assert ruhig.schwankung_mv < 20 and ruhig.urteil == "gut", (ruhig.schwankung_mv, ruhig.urteil)
+
+
+def test_kabel_bewerten():
+    assert nt.kabel_bewerten(120, "usbc3")[0] == "gruen"
+    a, t = nt.kabel_bewerten(400, "usbc3")
+    assert a == "gelb" and "1,9 A" in t, t                  # 0,75 V / 0,4 Ω
+    a, t = nt.kabel_bewerten(600, "usbc3")
+    assert a == "rot" and "Schrott" in t
+    assert nt.kabel_bewerten(160, "usbc5")[0] == "gelb"
+    assert nt.kabel_bewerten(450, "usb2")[0] == "gruen"
+    assert nt.kabel_bewerten(120, "") is None and nt.kabel_bewerten(0, "usbc3") is None
 
 
 if __name__ == "__main__":

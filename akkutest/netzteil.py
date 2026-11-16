@@ -76,6 +76,7 @@ class NetzteilEinstellung:
     kabel_mohm: float = 0.0   # Kabel + Adapter: wird herausgerechnet (Spannung an der Buchse)
     kabel_name: str = ""      # welches Kabel / welcher Adapter - steht im Bericht
     kabel_wann: float = 0.0   # wann der Kabelwert gemessen wurde (0 = von Hand eingetragen)
+    kabel_typ: str = ""       # Schlüssel aus KABEL_TYPEN - für die Kabelbewertung
     fuehler: bool = True      # Temperaturfühler des DL24 auswerten (aus: Temperatur ignorieren)
     hub: bool = False         # USB-Hub: geprüft wird nur ein Port
 
@@ -162,6 +163,34 @@ def ermitteln(e: NetzteilEinstellung, usb: bool) -> NetzteilEinstellung:
                                   "stufe_s": SUCH_STUFE_S, "dauertest": False, "abschalttest": False})
 
 
+# Kabel: erlaubter Widerstand Hin + Rück, Stecker eingerechnet.
+# USB-C (Type-C Cable and Connector Specification §4.4.1): höchstens 500 mV auf VBUS und
+# 250 mV auf GND bei vollem Nennstrom -> 750 mV / 3 A = 250 mΩ, / 5 A = 150 mΩ.
+# USB 2.0 (§7.2.2): je 125 mV auf VBUS und GND bei 500 mA -> 250 mV / 0,5 A = 500 mΩ.
+# Gelb bis zum Doppelten ist eine Einteilung dieser App.
+KABEL_TYPEN = {
+    "usbc3": ("USB-C (3 A)", 250.0, 3.0, 0.75),
+    "usbc5": ("USB-C (5 A, E-Marker)", 150.0, 5.0, 0.75),
+    "usb2": ("USB-A / Micro-USB (USB 2.0)", 500.0, 0.5, 0.25),
+}
+
+
+def kabel_bewerten(mohm: float, typ: str) -> tuple[str, str] | None:
+    """(Ampel, Satz) für ein Kabel - oder None, wenn Typ oder Wert fehlt."""
+    if typ not in KABEL_TYPEN or mohm <= 0:
+        return None
+    name, grenze, nenn_a, budget_v = KABEL_TYPEN[typ]
+    bis_a = budget_v / (mohm / 1000)
+    taugt = f"Taugt für bis zu {_k(min(bis_a, 99), 1)} A"
+    if mohm <= grenze:
+        return "gruen", f"In Ordnung: {_k(mohm, 0)} mΩ, erlaubt sind {_k(grenze, 0)} mΩ ({name}). {taugt}."
+    if mohm <= 2 * grenze:
+        return "gelb", (f"Schwach: {_k(mohm, 0)} mΩ, erlaubt sind {_k(grenze, 0)} mΩ ({name}). {taugt} – "
+                        f"für die vollen {_k(nenn_a, None)} A zu dünn.")
+    return "rot", (f"Schrott: {_k(mohm, 0)} mΩ, mehr als doppelt so viel wie erlaubt ({_k(grenze, 0)} mΩ, {name}). "
+                   f"{taugt} – nicht zum Laden oder Prüfen verwenden.")
+
+
 @dataclass
 class Schritt:
     art: str          # "stufe" | "dauer" | "abschalt"
@@ -215,6 +244,7 @@ class NetzteilErgebnis:
     spez_verletzt: bool = False            # USB: Spannung nachweislich außerhalb der Spezifikation
     schwankung_mv: float | None = None     # größte Schwankung einer Stufe bis zum Nennstrom
     kabel_unplausibel: bool = False        # Kabelwert größer als der ganze Widerstand - falsch gemessen
+    kabel_kreis: bool = False              # Kabelwert erklärt alles - womöglich mit diesem Netzteil gemessen
     spitze_v: float | None = None          # höchste Spannung der ganzen Prüfung (Leerlauf, Lastwechsel)
     unter_ab_a: float | None = None        # ab diesem Strom unter der gelben Grenze (USB 4,75 V)
     rot_ab_a: float | None = None          # ab diesem Strom unter der roten Grenze (USB 4,40 V)
@@ -314,6 +344,11 @@ def bewerten(e: NetzteilEinstellung, r: NetzteilErgebnis) -> None:
     r.max_w_tol = round(max((x.spannung * x.strom for x in in_tol), default=0), 2) or None
     r.max_w = round(max((x.spannung * x.strom for x in r.stufen), default=0), 2) or None
     gruende: list[str] = []
+    r.kabel_kreis = bool(kabel and not r.kabel_unplausibel and r.widerstand_mohm is not None
+                         and e.kabel_mohm >= 0.9 * r.widerstand_mohm - 5)
+    if r.kabel_kreis:
+        gruende.append(f"Kabelwert {_k(e.kabel_mohm, 0)} mΩ erklärt fast den ganzen gemessenen Widerstand "
+                       f"({_k(r.widerstand_mohm, 0)} mΩ) – wurde das Kabel mit diesem Netzteil gemessen?")
     if r.kabel_unplausibel:
         gruende.append(f"Kabelwert {_k(e.kabel_mohm, 0)} mΩ ist größer als der gesamte gemessene Widerstand "
                        f"({_k(r.widerstand_mohm, 0)} mΩ) – nicht herausgerechnet")
@@ -459,6 +494,10 @@ def laien_saetze(e: NetzteilEinstellung, r: NetzteilErgebnis, tiefst: float | No
                  "Widerstand. Er wurde wahrscheinlich nicht an einem guten Ladegerät gemessen, sondern an diesem "
                  "Gerät – dann würde er dessen eigene Schwäche dem Kabel zuschreiben. Er wurde deshalb nicht "
                  "herausgerechnet.")
+    if r.kabel_kreis:
+        s.append("Hinweis: Der eingetragene Kabelwert erklärt fast den ganzen Spannungsverlust. Wurde das Kabel mit "
+                 "genau diesem Netzteil gemessen, ist das Ergebnis im Kreis gerechnet und sagt über das Netzteil "
+                 "nichts aus. Dann das Kabel mit einem anderen Ladegerät messen und noch einmal prüfen.")
     if r.unter_ab_a is not None and not e.unbekannt:
         rot_u, gelb_u, _, _ = e.grenzen()
         ueber = " – also schon unterhalb der Angabe" if r.unter_ab_a < e.strom_a - 1e-6 else (

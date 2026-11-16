@@ -107,6 +107,11 @@ def messaufbau_html(e: dict, r: dict) -> str:
     else:
         zeilen.append(("Widerstand Kabel + Adapter", "nicht bekannt – die Spannung wurde am Ende des Kabels "
                                                      "gemessen, Verluste im Kabel sind darin enthalten"))
+    b = nt.kabel_bewerten(k, e.get("kabel_typ", "")) if k else None
+    if b:
+        zeilen.append(("Bewertung Kabel", f"<span style='color:{AMPEL[b[0]]}'>{html.escape(b[1])}</span> "
+                                          "<span style='color:gray'>(Grenze nach USB-Spezifikation; gelb/rot ist "
+                                          "eine Einteilung dieser Software)</span>"))
     return "<table cellspacing=4>" + "".join(
         f"<tr><td style='color:gray'>{a}</td><td>{b}</td></tr>" for a, b in zeilen) + "</table>"
 
@@ -364,14 +369,27 @@ class NetzteilReiter(QWidget):
         self.kabel_name = QLineEdit()
         self.kabel_name.setPlaceholderText("welches Kabel / welcher Adapter, z. B. Anker USB-C 1 m + Trigger-Adapter")
         f.addRow("Kabel (Bezeichnung):", self.kabel_name)
+        zeile = QHBoxLayout()
+        self.kabel_typ = QComboBox()
+        self.kabel_typ.addItem("– Typ wählen für die Bewertung –", "")
+        for schluessel, (name, grenze, *_rest) in nt.KABEL_TYPEN.items():
+            self.kabel_typ.addItem(f"{name} – erlaubt {grenze:.0f} mΩ", schluessel)
+        zeile.addWidget(self.kabel_typ, 1)
+        f.addRow("Kabeltyp:", zeile)
+        self.kabel_urteil = QLabel()
+        self.kabel_urteil.setWordWrap(True)
+        f.addRow(self.kabel_urteil)
         # Kabel bleibt zwischen zwei Programmstarts eingetragen
         from PySide6.QtCore import QSettings
         self._einst = QSettings("dl24-akkutest", "dl24-akkutest")
         self._kabel_wann = float(self._einst.value("kabel/wann", 0) or 0)
         self.kabel_name.setText(str(self._einst.value("kabel/name", "") or ""))
+        self.kabel_typ.setCurrentIndex(max(0, self.kabel_typ.findData(str(self._einst.value("kabel/typ", "") or ""))))
+        self.kabel_typ.currentIndexChanged.connect(self._kabel_merken)
         self.kabel.setValue(float(self._einst.value("kabel/mohm", 0) or 0))
         self.kabel.valueChanged.connect(self._kabel_merken)
         self.kabel_name.textChanged.connect(self._kabel_merken)
+        self._kabel_urteil_zeigen()
         self.schnell = QCheckBox("Schnellladegerät (USB-PD / QC / Fast Charging)")
         self.schnell.setToolTip("9 V, 12 V, 15 V, 20 V gibt das Ladegerät nur über einen Trigger-Adapter heraus")
         self.schnell.toggled.connect(self._schnell_umschalten)
@@ -534,9 +552,12 @@ class NetzteilReiter(QWidget):
                                     ("t", "Temperatur (Fühler)")]):
             self.anz[k] = Anzeige(t)
             raster.addWidget(self.anz[k], 0, i)
-        self.kabel_warnung = QLabel("⚠ Kabelwert zu groß – an der Buchse käme mehr an als ohne Last. Die "
-                                    "berechnete Kurve ist ausgeblendet. Bitte mit „Kabel messen …“ an einem guten "
-                                    "Ladegerät neu bestimmen.")
+        self._text_kabel_zu_gross = ("⚠ Kabelwert zu groß – er ist größer als der ganze Spannungsverlust. Bitte "
+                                     "mit „Kabel messen …“ an einem anderen, guten Ladegerät neu bestimmen.")
+        self._text_kabel_alles = ("⚠ Der Kabelwert erklärt den ganzen Spannungsverlust. Wurde das Kabel mit genau "
+                                  "diesem Netzteil gemessen? Dann ist das kein Prüfergebnis – das Kabel mit einem "
+                                  "anderen Ladegerät messen.")
+        self.kabel_warnung = QLabel(self._text_kabel_zu_gross)
         self.kabel_warnung.setWordWrap(True)
         self.kabel_warnung.setStyleSheet("color:#d03b3b; font-weight:bold;")
         self.kabel_warnung.hide()
@@ -561,7 +582,10 @@ class NetzteilReiter(QWidget):
         self.bild.setLabel("left", "Spannung (V)")
         self.legende = self.bild.addLegend(offset=(-10, 10))
         self.linie = self.bild.plot([], [], pen=pg.mkPen("#2f80ed", width=2), name="gemessen (am DL24)")
-        self.linie_b = self.bild.plot([], [], pen=pg.mkPen("#2e9e4f", width=2, style=Qt.DashLine))
+        # Mit Kabelwert: die Grenzen ans Kabelende umgerechnet (Grenze minus Kabelverlust) -
+        # dann liest man an der gemessenen Kurve direkt ab, ob das Netzteil reicht
+        self.linie_b = self.bild.plot([], [], pen=pg.mkPen("#c77700", width=2, style=Qt.DashLine))
+        self.linie_r = self.bild.plot([], [], pen=pg.mkPen("#d03b3b", width=2, style=Qt.DashLine))
         self.grenze = pg.InfiniteLine(angle=0, pen=pg.mkPen("#c77700", width=1, style=Qt.DashLine))
         self.grenze.hide()
         self.bild.addItem(self.grenze)
@@ -834,7 +858,8 @@ class NetzteilReiter(QWidget):
             max_proz=self.max_proz.value(), temp_grenze=self.temp_grenze.value(),
             fuehler=self.mit_fuehler.isChecked(), hub=self._ist_hub(),
             bis_ende=self.bis_ende.isChecked(), kabel_mohm=self.kabel.value(),
-            kabel_name=self.kabel_name.text().strip(), kabel_wann=self._kabel_wann)
+            kabel_name=self.kabel_name.text().strip(), kabel_wann=self._kabel_wann,
+            kabel_typ=self.kabel_typ.currentData() or "")
 
     def _unbekannt_umschalten(self, an: bool) -> None:
         if an:
@@ -932,7 +957,8 @@ class NetzteilReiter(QWidget):
         self.temp_grenze.setEnabled(not self.laeuft and self.mit_fuehler.isChecked())
         for w in (self.name, self.toleranz,
                   self.mit_stufen, self.stufen, self.stufe_s, self.mit_dauer, self.dauer_proz,
-                  self.dauer_min, self.mit_abschalt, self.mit_fuehler, self.kabel, self.bis_ende):
+                  self.dauer_min, self.mit_abschalt, self.mit_fuehler, self.kabel, self.bis_ende,
+                  self.kabel_name, self.kabel_typ):
             w.setEnabled(not self.laeuft)
         if not g:
             self.steuer_hinweis.setText("Erst verbinden.")
@@ -963,6 +989,19 @@ class NetzteilReiter(QWidget):
         self._einst.setValue("kabel/mohm", self.kabel.value())
         self._einst.setValue("kabel/name", self.kabel_name.text())
         self._einst.setValue("kabel/wann", self._kabel_wann)
+        self._einst.setValue("kabel/typ", self.kabel_typ.currentData())
+        self._kabel_urteil_zeigen()
+
+    def _kabel_urteil_zeigen(self) -> None:
+        b = nt.kabel_bewerten(self.kabel.value(), self.kabel_typ.currentData())
+        if not b:
+            self.kabel_urteil.setText("")
+            self.kabel_urteil.hide()
+            return
+        ampel, text = b
+        self.kabel_urteil.setText(f"<span style='color:{AMPEL[ampel]}; font-weight:bold'>"
+                                  f"{ {'gruen': '🟢', 'gelb': '🟡', 'rot': '🔴'}[ampel]} {html.escape(text)}</span>")
+        self.kabel_urteil.show()
 
     def kabel_messen(self) -> None:
         """Kabel + Adapter an einem guten Ladegerät messen: kurzer Stufentest, die
@@ -1008,7 +1047,9 @@ class NetzteilReiter(QWidget):
         self.schritt.setText(f"Kabel + Adapter: {r.widerstand_mohm:.0f} mΩ – eingetragen")
         log.info("Kabel gemessen: %.0f mΩ", r.widerstand_mohm)
         QMessageBox.information(self, "Kabel messen",
-                                f"Kabel + Adapter: {r.widerstand_mohm:.0f} mΩ.\n\nDer Wert ist eingetragen und wird "
+                                f"Kabel + Adapter: {r.widerstand_mohm:.0f} mΩ.\n\n"
+                                + ((nt.kabel_bewerten(r.widerstand_mohm, self.kabel_typ.currentData()) or ("", ""))[1]
+                                   or "Für eine Bewertung oben den Kabeltyp wählen.") + "\n\nDer Wert ist eingetragen und wird "
                                 "bei den nächsten Prüfungen herausgerechnet. Jetzt das zu prüfende Gerät anschließen.")
 
     def starten(self) -> None:
@@ -1073,6 +1114,7 @@ class NetzteilReiter(QWidget):
             self._kabel_ohm = 0.0
             self.bild.setLabel("left", "Spannung (V)")
             self.legende.removeItem(self.linie_b)
+            self.legende.removeItem(self.linie_r)
             return
         rot_u, gelb_u, gelb_o, rot_o = e.grenzen()
         weit = e.nenn_v * 10 + 50
@@ -1083,39 +1125,56 @@ class NetzteilReiter(QWidget):
         self.grenze.setValue(gelb_u)
         self.grenze.show()
         self._kabel_ohm = e.kabel_mohm / 1000
+        self._gelb_u, self._rot_u = gelb_u, rot_u
         self.bild.setLabel("left", "Spannung (V)")
         self.legende.removeItem(self.linie_b)
+        self.legende.removeItem(self.linie_r)
         if e.kabel_mohm:
-            self.legende.addItem(self.linie_b, f"an der Buchse (berechnet, Kabel {e.kabel_mohm:.0f} mΩ)")
+            # Bänder gelten an der Buchse - am Kabelende verschieben sie sich mit dem Strom.
+            # Statt Bändern die umgerechneten Grenzlinien.
+            for b in self.baender:
+                b.hide()
+            self.grenze.hide()
+            self.legende.addItem(self.linie_b, f"Mindestwert {zahl(gelb_u)} V, ans Kabelende umgerechnet")
+            self.legende.addItem(self.linie_r, f"Untergrenze {zahl(rot_u)} V, ans Kabelende umgerechnet")
 
     def _kurven(self, punkte: list) -> None:
         """Alle Streifen aus den Punkten (s, V, A, °C oder None)."""
         x = [p[0] / 60 for p in punkte]
-        # Gemessen wird am DL24; mit Kabelwert zusätzlich gestrichelt die berechnete
-        # Spannung an der Buchse - die Ampel gilt für die Buchse
+        # Gezeigt wird nur, was gemessen wurde. Mit Kabelwert kommen die Grenzen dazu,
+        # ans Kabelende umgerechnet: liegt Blau darüber, reicht das Netzteil.
         gemessen = [p[1] for p in punkte]
         self.linie.setData(x, gemessen)
-        v = gemessen
+        v = list(gemessen)
         self.linie_b.setData([], [])
+        self.linie_r.setData([], [])
+        self.kabel_warnung.hide()
         if self._kabel_ohm and punkte:
             buchse = [p[1] + p[2] * self._kabel_ohm for p in punkte]
-            # Mehr als ohne Last geht an der Buchse nicht - dann ist der Kabelwert falsch
             leer = max((p[1] for p in punkte if p[2] < 0.01), default=None)
+            belastet = [(b, p[2]) for b, p in zip(buchse, punkte) if p[2] > 0.3]
             if leer is not None and max(buchse) > leer + 0.02:
-                if not self.kabel_warnung.isVisible():
-                    self.kabel_warnung.show()
+                # mehr als ohne Last geht an der Buchse nicht - Kabelwert falsch
+                self.kabel_warnung.setText(self._text_kabel_zu_gross)
+                self.kabel_warnung.show()
             else:
-                self.kabel_warnung.hide()
-                self.linie_b.setData(x, buchse)
-                v = buchse
-        v = v + gemessen
+                if leer is not None and belastet and max(i for _, i in belastet) > 0.8 and \
+                        all(abs(b - leer) < 0.015 for b, _ in belastet):
+                    # das Kabel erklärt den ganzen Abfall - meist mit diesem Netzteil gemessen
+                    self.kabel_warnung.setText(self._text_kabel_alles)
+                    self.kabel_warnung.show()
+                gelb = [self._gelb_u - p[2] * self._kabel_ohm for p in punkte]
+                rot = [self._rot_u - p[2] * self._kabel_ohm for p in punkte]
+                self.linie_b.setData(x, gelb)
+                self.linie_r.setData(x, rot)
+                v += [g for g, p in zip(gelb, punkte) if p[2] > 0.01]
+                v += [g for g, p in zip(rot, punkte) if p[2] > 0.01]
         # Spannungsachse nach dem Betrieb, nicht nach dem Einbruch auf 0 beim Abschalten -
         # sonst werden die Stufen platt
         if self._nenn_v and v:
             # bei Schnellladen nur die aktuelle Spannung - sonst reicht die Achse von 5 bis 20 V
             if self._teil_ab and len(punkte) > self._teil_ab:
-                v = [p[1] + p[2] * self._kabel_ohm for p in punkte[self._teil_ab:]] + \
-                    [p[1] for p in punkte[self._teil_ab:]]
+                v = [p[1] for p in punkte[self._teil_ab:]]
             gut = [u for u in v if u >= self._nenn_v * nt.ZUSAMMENBRUCH] or v
             lo, hi = min(gut), max(gut)
             if self.grenze.isVisible():

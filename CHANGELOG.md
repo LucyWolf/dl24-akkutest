@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.30 – 16.11.2026
+
+- **Diagramm mit Kabelwert neu:** keine hochgerechnete „Buchsen“-Kurve mehr.
+  Gezeigt wird nur die gemessene Spannung, dazu die Grenzen (4,75 V / 4,40 V
+  bei USB) **ans Kabelende umgerechnet** als gestrichelte Treppe. Liegt die
+  gemessene Kurve darüber, reicht das Netzteil; fällt sie darunter, nicht.
+- **Hinweis, wenn das Kabel alles erklärt:** Wurde das Kabel mit genau dem
+  geprüften Netzteil gemessen, ist das Ergebnis im Kreis gerechnet – die App
+  sagt das jetzt im Diagramm und im Bericht.
+- **Kabel bewerten:** Kabeltyp wählen (USB-C 3 A, USB-C 5 A, USB 2.0). Grenze
+  nach USB-Spezifikation (USB-C: 500 mV + 250 mV bei Nennstrom → 250 mΩ bzw.
+  150 mΩ; USB 2.0: 500 mΩ). Grün bis zur Grenze, gelb bis zum Doppelten, rot
+  darüber („Schrott“), dazu „taugt für bis zu x A“. Steht auch im Bericht.
+
 ## 1.0.29 – 16.11.2026
 
 - **Eigene Vorlagen:** „Speichern“ neben der Vorlagenliste legt das ganze

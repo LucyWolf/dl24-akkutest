@@ -294,10 +294,16 @@ def test_netzteil_reiter():
     f.nt._grenzen_zeigen(f.nt.einstellung())
     f.nt._kabel_ohm = 0.5
     f.nt._kurven([(0, 5.05, 0.0, None), (10, 4.9, 1.0, None), (20, 4.75, 2.0, None)])
-    assert f.nt.kabel_warnung.isVisible() and not f.nt.linie_b.getData()[0]
+    assert f.nt.kabel_warnung.isVisible() and "zu groß" in f.nt.kabel_warnung.text()
+    assert f.nt.linie_b.getData()[0] is None or not len(f.nt.linie_b.getData()[0])
     f.nt._kabel_ohm = 0.1
     f.nt._kurven([(0, 5.05, 0.0, None), (10, 4.9, 1.0, None), (20, 4.75, 2.0, None)])
-    assert not f.nt.kabel_warnung.isVisible() and len(f.nt.linie_b.getData()[0]) == 3
+    assert not f.nt.kabel_warnung.isVisible()
+    gelb = list(f.nt.linie_b.getData()[1])
+    assert abs(gelb[2] - (4.75 - 0.2)) < 1e-6, gelb                # Mindestwert minus Kabelverlust bei 2 A
+    f.nt._kabel_ohm = 0.15                                           # erklärt alles: Kreis
+    f.nt._kurven([(0, 5.05, 0.0, None), (10, 4.9, 1.0, None), (20, 4.75, 2.0, None)])
+    assert f.nt.kabel_warnung.isVisible() and "genau diesem Netzteil" in f.nt.kabel_warnung.text()
     f.nt._grenzen_zeigen(None)
         # Kabel messen: kurzer Lauf, Wert landet im Feld, nicht in der Liste
     f.nt.kabel.setValue(500)                 # schon ein Wert drin - neu messen muss trotzdem gehen
@@ -307,11 +313,14 @@ def test_netzteil_reiter():
     app.processEvents()
     assert 100 <= f.nt.kabel.value() <= 150, f.nt.kabel.value()
     f.nt.kabel_name.setText("Testkabel 1 m")
+    f.nt.kabel_typ.setCurrentIndex(f.nt.kabel_typ.findData("usbc3"))
+    assert f.nt.kabel_urteil.isVisible() and "In Ordnung" in f.nt.kabel_urteil.text()
     e = f.nt.einstellung()
     assert e.kabel_name == "Testkabel 1 m" and e.kabel_wann > 0
     from akkutest.netzteil_reiter import messaufbau_html
     t = messaufbau_html(e.__dict__, {})
-    assert "Testkabel 1 m" in t and "gemessen am" in t and "herausgerechnet" in t, t
+    assert "Testkabel 1 m" in t and "gemessen am" in t and "herausgerechnet" in t and "Bewertung Kabel" in t, t
+    f.nt.kabel_typ.setCurrentIndex(0)
     assert len(sp.netzteil_tests()) == 1 and "eingetragen" in f.nt.schritt.text()
     f.nt.kabel.setValue(0)
     f.trennen()
