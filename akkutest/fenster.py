@@ -985,7 +985,7 @@ def main() -> int:
     if "--fenster-probe" in sys.argv:
         # Für den Bau: öffnet das Fenster wirklich und schließt es wieder
         sichtbar = []
-        QTimer.singleShot(800, lambda: (sichtbar.append(f.isVisible() and f.reiter.count() == 5), app.quit()))
+        QTimer.singleShot(800, lambda: (sichtbar.append(f.isVisible() and f.reiter.count() == 6), app.quit()))
         rc = app.exec()
         print("Fenster geöffnet:", sichtbar, f.windowTitle())
         return rc if sichtbar == [True] else 1

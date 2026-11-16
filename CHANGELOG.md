@@ -1,9 +1,14 @@
 # Changelog
 
+## 1.0.38 – 16.11.2026
+
+Enthält alles aus 1.0.36 und 1.0.37 – beide sind nie erschienen. Der Bau
+prüft beim Fensterstart die Zahl der Reiter und kannte den neuen Reiter
+„Powerbanks“ noch nicht.
+
 ## 1.0.37 – 16.11.2026
 
-Enthält alles aus 1.0.36 – deren Bau scheiterte an einem Test, sie ist nie
-erschienen.
+Nie erschienen (Bau gescheitert), enthalten in 1.0.38.
 
 - **Akkuzustand der Powerbank:** gemessene Energie gegen den Neuwert am
   Ausgang – aus der „Rated Capacity“ des Aufdrucks (neues Feld) oder, ohne
