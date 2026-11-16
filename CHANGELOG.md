@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.35 – 16.11.2026
+
+- **Diagramme bleiben im Bild:** Verschieben und Zoomen mit der Maus ist
+  abgeschaltet, alle Streifen passen ihre Höhe bei jedem Messwert selbst an.
+  Vorher blieb eine verschobene Ansicht hängen und neue Werte liefen aus dem
+  Bild.
+
 ## 1.0.34 – 16.11.2026
 
 - **Kabelverlust als Diagramm:** Mit eingetragenem Kabelwert gibt es unter

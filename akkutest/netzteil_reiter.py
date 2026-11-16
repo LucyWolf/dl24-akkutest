@@ -662,6 +662,15 @@ class NetzteilReiter(QWidget):
         self.bild_i.setXLink(self.bild)
         self.bild_t.setXLink(self.bild)
         self.bild_k.setXLink(self.bild)
+        # Die Ansicht folgt immer den Werten - kein Verschieben oder Zoomen mit der Maus,
+        # sonst bleibt sie dort hängen und neue Werte laufen aus dem Bild
+        for b in (self.bild, self.bild_i, self.bild_t, self.bild_k):
+            b.setMouseEnabled(x=False, y=False)
+            b.setMenuEnabled(False)
+            b.hideButtons()
+        for box in (self.box_p, self.box_k):
+            box.setMouseEnabled(x=False, y=False)
+            box.setMenuEnabled(False)
         self.bild.hideAxis("bottom")
         self.bild_i.setLabel("bottom", "Zeit (min)")
         lay = self.flaeche.ci.layout
@@ -1232,7 +1241,8 @@ class NetzteilReiter(QWidget):
         else:
             self.linie_kw.setData([], [])
             self.linie_kp.setData([], [])
-        self.box_p.enableAutoRange(y=True)
+        for b in (self.bild_i.vb, self.bild_t.vb, self.bild_k.vb, self.box_p, self.box_k):
+            b.enableAutoRange(y=True)
 
     def _streifen(self, kabel: bool, temp: bool) -> None:
         """Unter Strom/Leistung: Kabelverlust (mit Kabelwert), dann Temperatur (mit Fühler).

@@ -315,6 +315,11 @@ def test_netzteil_reiter():
     assert f.nt.bild_t.getAxis("bottom").isVisible() and not f.nt.bild_k.getAxis("bottom").isVisible()
     warten(lambda: False, 0.3)
     foto(f, "13-kabelverlust")
+    # Maus darf die Ansicht nicht verstellen
+    assert not any(f.nt.bild.vb.state["mouseEnabled"]) and not any(f.nt.bild_i.vb.state["mouseEnabled"])
+    f.nt.bild_i.vb.disableAutoRange()
+    f.nt._kurven([(0, 5.16, 0.0, None), (10, 4.68, 3.0, 30.0)])
+    assert f.nt.bild_i.vb.autoRangeEnabled()[1]
     f.nt._kabel_r = 0.0
     f.nt._kurven([(0, 5.16, 0.0, None), (10, 4.68, 3.0, None)])
     assert not f.nt._mit_kabel and not f.nt.box_k.isVisible() and f.nt.bild_i.getAxis("bottom").isVisible()
