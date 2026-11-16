@@ -249,6 +249,8 @@ def test_netzteil_reiter():
     assert f.nt.laeuft and not f.knopf_start.isEnabled()      # kein Akkutest nebenher
     assert warten(lambda: f.nt.schritt.text().startswith("Stufentest") and "gesamt noch" in f.nt.schritt.text(),
                   10), f.nt.schritt.text()
+    assert warten(lambda: f.nt.anz["r"].wert.text().endswith("mΩ"), 30), f.nt.anz["r"].wert.text()
+    assert 80 <= int(f.nt.anz["r"].wert.text().split()[0]) <= 160, f.nt.anz["r"].wert.text()   # Simulator: 120
     foto(f, "7-netzteil-laeuft")
     assert warten(lambda: not f.nt.laeuft and f.nt.ergebnis.isVisible(), 60), f.nt.ablauf.zustand
     r = f.nt.ablauf.ergebnis

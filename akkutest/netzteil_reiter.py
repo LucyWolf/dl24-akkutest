@@ -549,7 +549,7 @@ class NetzteilReiter(QWidget):
         raster = QGridLayout()
         self.anz = {}
         for i, (k, t) in enumerate([("u", "Spannung"), ("i", "Strom"), ("p", "Leistung"),
-                                    ("t", "Temperatur (Fühler)")]):
+                                    ("t", "Temperatur (Fühler)"), ("r", "Widerstand (Netzteil + Kabel)")]):
             self.anz[k] = Anzeige(t)
             raster.addWidget(self.anz[k], 0, i)
         self._text_kabel_zu_gross = ("⚠ Kabelwert zu groß – er ist größer als der ganze Spannungsverlust. Bitte "
@@ -565,13 +565,13 @@ class NetzteilReiter(QWidget):
         self.schritt.setWordWrap(True)
         self.schritt.setMinimumHeight(40)
         self.schritt.setStyleSheet("font-weight: bold;")
-        raster.addWidget(self.schritt, 1, 0, 1, 3)
+        raster.addWidget(self.schritt, 1, 0, 1, 4)
         self.knopf_weiter = QPushButton("Kommt nicht – überspringen")
         self.knopf_weiter.setToolTip("Diese Spannung liefert das Ladegerät nicht")
         self.knopf_weiter.clicked.connect(self._ueberspringen)
         self.knopf_weiter.hide()
-        raster.addWidget(self.knopf_weiter, 1, 3)
-        raster.addWidget(self.kabel_warnung, 2, 0, 1, 4)
+        raster.addWidget(self.knopf_weiter, 1, 4)
+        raster.addWidget(self.kabel_warnung, 2, 0, 1, 5)
         ol.addLayout(raster)
         # Ein Diagramm in drei Streifen mit gemeinsamer Zeitachse:
         # Spannung · Strom und Leistung · Temperatur (nur mit Fühler)
@@ -1229,6 +1229,15 @@ class NetzteilReiter(QWidget):
         self.anz["u"].setzen(zahl(m.spannung, stellen, "V"))
         self.anz["i"].setzen(zahl(m.strom, 3, "A"))
         self.anz["p"].setzen(zahl(m.leistung, 2, "W"))
+        # Widerstand laufend: Spannungsverlust gegenüber dem Leerlauf durch den Strom
+        ab = self.ablauf
+        teil = ab.teil if isinstance(ab, nt.TriggerAblauf) else ab
+        leer = teil.ergebnis.leerlauf_v if isinstance(teil, nt.NetzteilAblauf) else None
+        if leer and m.strom > 0.1 and ab and ab.laeuft:
+            self.anz["r"].setzen(f"{max(0.0, (leer - m.spannung) / m.strom) * 1000:.0f} mΩ")
+        elif not (ab and ab.laeuft):
+            r = getattr(self, "_angezeigt", (None, {}))[1] or {}
+            self.anz["r"].setzen(f"{r['widerstand_mohm']:.0f} mΩ" if r.get("widerstand_mohm") else "–")
         if not self.mit_fuehler.isChecked():
             self.anz["t"].setzen("aus")
         else:

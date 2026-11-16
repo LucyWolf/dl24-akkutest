@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.31 – 16.11.2026
+
+- Eigenes Anzeigefeld **„Widerstand (Netzteil + Kabel)“** in mΩ: laufend aus
+  dem Spannungsverlust gegenüber dem Leerlauf, nach der Prüfung der Wert aus der
+  Kennlinie.
+
 ## 1.0.30 – 16.11.2026
 
 - **Diagramm mit Kabelwert neu:** keine hochgerechnete „Buchsen“-Kurve mehr.
