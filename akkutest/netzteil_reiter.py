@@ -1055,7 +1055,16 @@ class NetzteilReiter(QWidget):
             rest = teil.restzeit(m.zeit)
             if rest:
                 vorn = self.schritt.text().split(" · noch")[0]
-                self.schritt.setText(f"{vorn} · noch {dauer_text(rest[0])[2:]} · gesamt noch "
+                gesamt = "gesamt noch"
+                if isinstance(ab, nt.TriggerAblauf):
+                    # die weiteren Spannungen kommen danach - sonst sieht es aus, als käme nur diese
+                    weiter = [v for v, _ in ab.stufen[ab.i + 1:]]
+                    rest = (rest[0], rest[1] + sum(sum(x.dauer_s for x in nt.plan(ab.einstellung_fuer(v, a)))
+                                                   for v, a in ab.stufen[ab.i + 1:]))
+                    gesamt = (f"Spannung {ab.i + 1} von {len(ab.stufen)}"
+                              + (", danach " + ", ".join(f"{_kurz(v)} V" for v in weiter) if weiter else "")
+                              + " · alle zusammen noch etwa")
+                self.schritt.setText(f"{vorn} · noch {dauer_text(rest[0])[2:]} · {gesamt} "
                                      f"{dauer_text(rest[1])}")
         if ab:
             punkte = list(ab.punkte)

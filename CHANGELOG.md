@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.28 – 16.11.2026
+
+- **Schnellladen:** Die Anzeige sagt, welche Spannung gerade dran ist und
+  welche noch folgen („Spannung 1 von 2, danach 9 V“), und die Restzeit gilt
+  für alle zusammen. Vorher sah es so aus, als würde nur 5 V geprüft.
+
 ## 1.0.27 – 16.11.2026
 
 - **Schnellladen:** Die Ampel im Diagramm erscheint jetzt auch hier – für die

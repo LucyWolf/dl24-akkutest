@@ -384,6 +384,7 @@ def test_schnellladen_im_fenster():
     assert "Umschalten" in f.nt.dauer.text(), f.nt.dauer.text()
     f.nt.starten()
     assert warten(lambda: "jetzt 5 V" in f.nt.schritt.text() and f.nt.knopf_weiter.isVisible(), 5), f.nt.schritt.text()
+    assert warten(lambda: "Spannung 1 von 3, danach 9 V, 15 V" in f.nt.schritt.text(), 30), f.nt.schritt.text()
     assert warten(lambda: "jetzt 9 V" in f.nt.schritt.text(), 30), f.nt.schritt.text()
     foto(f, "10-trigger-umschalten")
     quelle.nenn_v = 9.0                      # Mensch drückt am Adapter
