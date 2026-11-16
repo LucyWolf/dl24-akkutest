@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.34 – 16.11.2026
+
+- **Kabelverlust als Diagramm:** Mit eingetragenem Kabelwert gibt es unter
+  Strom/Leistung einen eigenen Streifen: wie viel Watt im Kabel verloren gehen
+  (lila) und welcher Anteil der Leistung des Netzteils das ist (türkis). In der
+  Kennlinie steht der Verlust je Stufe in Watt und Prozent, bei „Leistung“
+  zusätzlich, was das Netzteil selbst abgibt.
+- **Tabelle wie Urteil:** Die Häkchen in der Kennlinie haben das Kabel noch
+  herausgerechnet – überall ✔, obwohl das Urteil „eingeschränkt“ lautete.
+  Jetzt zeigen beide, was am Kabelende ankommt.
+- **Grenzen für 9–20 V nach USB-PD (§7.1.8):** grün ±5 %, gelb bis 0,5 V
+  darüber hinaus, sonst rot. Vorher galt pauschal die doppelte Toleranz.
+  Kurze Spitzen beim Lastwechsel innerhalb dieser 0,5 V sind erlaubt. Für QC
+  gibt es keine öffentliche Vorgabe – dort gelten dieselben Grenzen.
+
 ## 1.0.33 – 16.11.2026
 
 - **Feste Grenzlinien:** Die Grenzen im Spannungsdiagramm bleiben immer

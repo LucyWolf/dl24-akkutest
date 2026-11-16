@@ -202,6 +202,34 @@ def test_urteil_mit_und_ohne_kabel():
     assert gut.urteil == "gut", (gut.urteil, gut.gruende)
 
 
+def test_pd_grenzen():
+    # über 5 V: USB-PD §7.1.8 - ±5 % (grün), höchstens 0,5 V darüber hinaus (gelb), sonst rot
+    basis = nt.NetzteilEinstellung("PD", 5.0, 3.0, toleranz_proz=10)
+    neun = nt.trigger_einstellung(basis, 9.0, 2.0)
+    assert neun.pd and not neun.usb
+    assert [round(x, 3) for x in neun.grenzen()] == [8.05, 8.55, 9.45, 9.95], neun.grenzen()
+    zwanzig = nt.trigger_einstellung(basis, 20.0, 3.0)
+    assert [round(x, 3) for x in zwanzig.grenzen()] == [18.5, 19.0, 21.0, 21.5]
+    fuenf = nt.trigger_einstellung(basis, 5.0, 3.0)
+    assert not fuenf.pd and fuenf.grenzen() == (4.4, 4.75, 5.25, 5.5)
+    # alte gespeicherte Einstellung ohne Feld "pd": wie bisher
+    assert not nt.NetzteilEinstellung("alt", 9.0, 2.0).pd
+
+
+def test_tabelle_wie_urteil():
+    # Quest-Netzteil mit 160-mΩ-Kabel: Tabelle zeigt, was am Kabelende ankommt, wie das Urteil
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from akkutest.netzteil_reiter import ergebnis_html
+    e = nt.NetzteilEinstellung("Quest", 5.0, 3.0, kabel_mohm=160).__dict__
+    st = lambda a, v: {"soll_a": a, "spannung": v, "min_v": v - 0.002, "strom": a, "ok": v >= 4.75, "max_v": v}
+    r = {"stufen": [st(2.4, 4.779), st(3.0, 4.678)], "leerlauf_v": 5.165, "max_w": 14.0, "max_w_tol": 11.5,
+         "widerstand_mohm": 164}
+    h = ergebnis_html(e, r, fach=True)
+    assert h.count("⚠ unter 4,75 V") == 1 and h.count("✔") >= 1, h
+    assert "1,4 W im Kabel verloren" in h and "15,5 W" in h, h
+    assert "im Kabel verloren</td>" in h and "1,44 W (9,3 %)" in h, h      # 3 A: 1,44 W von 15,5 W
+
+
 def test_zu_hohe_spannung():
     q = SimNetzteil(5.6, innen_mohm=50, abschalt_a=9)
     e = nt.NetzteilEinstellung("Billig", 5.0, 1.0, stufen=2, stufe_s=10, dauertest=False, toleranz_proz=20)

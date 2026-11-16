@@ -79,6 +79,7 @@ class NetzteilEinstellung:
     kabel_typ: str = ""       # Schlüssel aus KABEL_TYPEN - für die Kabelbewertung
     fuehler: bool = True      # Temperaturfühler des DL24 auswerten (aus: Temperatur ignorieren)
     hub: bool = False         # USB-Hub: geprüft wird nur ein Port
+    pd: bool = False          # höhere Spannung über USB-PD/QC: Grenzen nach USB-PD (vSrcNew/vSrcValid)
 
     @property
     def strom_a(self) -> float:
@@ -102,12 +103,20 @@ class NetzteilEinstellung:
     @property
     def mindest_v(self) -> float:
         """Darunter: nicht verwenden. USB: 4,4 V am Gerät; sonst die doppelte Toleranz."""
-        return 4.4 if self.usb else self.nenn_v * (1 - 2 * self.toleranz_proz / 100)
+        if self.usb:
+            return 4.4
+        if self.pd:     # USB-PD vSrcValid: höchstens 0,5 V außerhalb von ±5 %
+            return self.untere_v - PD_VALID_V
+        return self.nenn_v * (1 - 2 * self.toleranz_proz / 100)
 
     @property
     def hoechst_v(self) -> float:
         """Darüber im Leerlauf: gefährlich für angeschlossene Geräte."""
-        return 5.5 if self.usb else self.nenn_v * (1 + 2 * self.toleranz_proz / 100)
+        if self.usb:
+            return 5.5
+        if self.pd:
+            return self.obere_v + PD_VALID_V
+        return self.nenn_v * (1 + 2 * self.toleranz_proz / 100)
 
     def grenzen(self) -> tuple[float, float, float, float]:
         """Ampel für die Spannung: (rot unter, gelb unter, gelb über, rot über).
@@ -312,6 +321,8 @@ USB_MIN_V = 4.75
 USB_MAX_V = 5.25
 USB_SCHWACH_V = 4.40
 GEFAHR_V = 5.5
+PD_VALID_V = 0.5      # USB-PD §7.1.8, Tabelle "Source Electrical Parameters": vSrcValid ±0,5 V
+SPEZ_PD = "USB-PD-Spezifikation §7.1.8 (±5 %, kurzzeitig höchstens 0,5 V mehr)"
 SPEZ = "USB-Spezifikation (USB 2.0, auch als EN 62680-2-1 veröffentlicht)"
 
 
@@ -379,15 +390,17 @@ def bewerten(e: NetzteilEinstellung, r: NetzteilErgebnis) -> None:
     _, _, gelb_o, rot_o = e.grenzen()
     if hoch is not None and hoch > rot_o:
         schlimm = True
-        r.spez_verletzt = r.spez_verletzt or e.usb
+        r.spez_verletzt = r.spez_verletzt or e.usb or e.pd
         gruende.append(f"Überspannung: bis {_k(hoch)} V gemessen – über {_k(rot_o)} V"
-                       + (f" (USB-Vorgabe höchstens {_k(USB_MAX_V)} V, {SPEZ} §7.2.2)" if e.usb else "")
+                       + (f" (USB-Vorgabe höchstens {_k(USB_MAX_V)} V, {SPEZ} §7.2.2)" if e.usb else
+                          f" ({SPEZ_PD})" if e.pd else "")
                        + ", kann angeschlossene Geräte beschädigen")
-    elif hoch is not None and hoch > gelb_o:
+    elif hoch is not None and hoch > gelb_o and not (e.pd and (r.leerlauf_v or 0) <= gelb_o):
+        # USB-PD erlaubt beim Lastwechsel kurz bis 0,5 V mehr - dort zählt nur der Leerlauf
         knapp = True
-        r.spez_verletzt = r.spez_verletzt or e.usb
+        r.spez_verletzt = r.spez_verletzt or e.usb or e.pd
         gruende.append(f"Überspannung: bis {_k(hoch)} V gemessen – über {_k(gelb_o)} V"
-                       + (f" ({SPEZ} §7.2.2)" if e.usb else ""))
+                       + (f" ({SPEZ} §7.2.2)" if e.usb else f" ({SPEZ_PD})" if e.pd else ""))
     tiefst = None
     if e.unbekannt:
         r.verspricht = None
@@ -412,14 +425,17 @@ def bewerten(e: NetzteilEinstellung, r: NetzteilErgebnis) -> None:
                                f"({SPEZ} §7.2.2)")
         elif tiefst is not None:
             wo = "an der Buchse" if kabel else "am Kabelende"
+            quelle = f" – {SPEZ_PD}" if e.pd else ""
             if tiefst < e.mindest_v:
                 schlimm = True
+                r.spez_verletzt = r.spez_verletzt or e.pd
                 gruende.append(f"Spannung fällt bis zum Nennstrom auf {_k(tiefst)} V {wo} "
-                               f"(Mindestwert {_k(e.mindest_v)} V)")
+                               f"(Mindestwert {_k(e.mindest_v)} V{quelle})")
             elif tiefst < e.untere_v:
                 knapp = True
+                r.spez_verletzt = r.spez_verletzt or e.pd
                 gruende.append(f"Spannung fällt bis zum Nennstrom auf {_k(tiefst)} V {wo} – unter der Toleranz "
-                               f"({_k(e.untere_v)} V)")
+                               f"({_k(e.untere_v)} V{quelle})")
     if e.kabel_mohm and tiefst is not None and tiefst < (USB_MIN_V if e.usb else e.untere_v):
         gruende.append(f"Davon entfallen bei {_k(e.strom_a)} A etwa {_k(e.strom_a * e.kabel_mohm, 0)} mV auf das "
                        f"Kabel ({_k(e.kabel_mohm, 0)} mΩ) – ein besseres Kabel hebt die Spannung entsprechend")
@@ -784,7 +800,9 @@ class TriggerErgebnis:
 
 def trigger_einstellung(basis: NetzteilEinstellung, volt: float, ampere: float) -> NetzteilEinstellung:
     e = NetzteilEinstellung(**{**basis.__dict__, "name": f"{basis.name} – {volt:g} V",
-                               "nenn_v": volt, "nenn_a": ampere, "nenn_w": 0.0, "trigger": []})
+                               "nenn_v": volt, "nenn_a": ampere, "nenn_w": 0.0, "trigger": [],
+                               # über 5 V gelten die Grenzen der USB-PD-Spezifikation: ±5 %
+                               **({"pd": True, "toleranz_proz": 5.0} if volt > 5.5 else {})})
     return ermitteln(e, usb=True) if ampere <= 0 else e
 
 

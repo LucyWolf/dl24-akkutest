@@ -307,6 +307,17 @@ def test_netzteil_reiter():
     f.nt._kurven([(0, 5.05, 0.0, None), (10, 4.9, 1.0, None), (20, 4.75, 2.0, None)])
     assert f.nt.kabel_warnung.isVisible() and "genau diesem Netzteil" in f.nt.kabel_warnung.text()
     f.nt._grenzen_zeigen(None)
+    # Kabelverlust-Streifen unter Strom/Leistung, nur mit Kabelwert; Zeitachse am untersten Streifen
+    f.nt._kabel_r = 0.16
+    f.nt._kurven([(0, 5.16, 0.0, None), (10, 4.68, 3.0, 30.0)])
+    assert f.nt._mit_kabel and f.nt.box_k.isVisible() and abs(f.nt.linie_kw.getData()[1][1] - 1.44) < 1e-9
+    assert abs(f.nt.linie_kp.getData()[1][1] - 1.44 / (4.68 * 3 + 1.44) * 100) < 1e-9
+    assert f.nt.bild_t.getAxis("bottom").isVisible() and not f.nt.bild_k.getAxis("bottom").isVisible()
+    warten(lambda: False, 0.3)
+    foto(f, "13-kabelverlust")
+    f.nt._kabel_r = 0.0
+    f.nt._kurven([(0, 5.16, 0.0, None), (10, 4.68, 3.0, None)])
+    assert not f.nt._mit_kabel and not f.nt.box_k.isVisible() and f.nt.bild_i.getAxis("bottom").isVisible()
         # Kabel messen: kurzer Lauf, Wert landet im Feld, nicht in der Liste
     f.nt.kabel.setValue(500)                 # schon ein Wert drin - neu messen muss trotzdem gehen
     f.nt.kabel_messen()

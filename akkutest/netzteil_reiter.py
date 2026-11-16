@@ -7,7 +7,7 @@ import threading
 import time
 from datetime import datetime
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QFrame, QGridLayout,
     QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QSpinBox,
@@ -126,7 +126,8 @@ def geprueft_text(e: dict, r: dict) -> str:
             f"von {zahl(lo)} bis {zahl(hi)} Ampere – und dabei wurde gemessen, wie viel Spannung noch ankommt. "
             "Ein gutes Netzteil hält die Spannung auch unter Last fast gleich.")
     if e.get("kabel_mohm"):
-        text += f" Der Verlust im Kabel ({e['kabel_mohm']:.0f} mΩ) ist herausgerechnet."
+        text += (f" Gemessen wurde am Ende des Kabels ({e['kabel_mohm']:.0f} mΩ), also so, wie es beim Gerät "
+                 "ankommt – der Verlust im Kabel ist darin enthalten.")
     return text
 
 
@@ -189,6 +190,13 @@ def ergebnis_html(e: dict, r: dict, fach: bool = False) -> str:
         text += f" · höchstens {zahl(r['max_w'], 1)} W"
         if r.get("abschalt_a") is not None:
             text += " (danach Abschaltung)"
+        k_ohm = e.get("kabel_mohm", 0) / 1000
+        groesst = max(stufen, key=lambda s: s["strom"]) if stufen else None
+        if k_ohm and groesst:
+            # am DL24 kommt an, was das Kabel übrig lässt - der Rest wird im Kabel zu Wärme
+            verlust = groesst["strom"] ** 2 * k_ohm
+            text += (f"<br>dazu {zahl(verlust, 1)} W im Kabel verloren (bei {zahl(groesst['strom'], 2)} A) – "
+                     f"das Netzteil selbst gibt etwa {zahl(groesst['spannung'] * groesst['strom'] + verlust, 1)} W ab")
         tab.append(("Leistung", text))
     d = r.get("dauer")
     if d:
@@ -226,7 +234,7 @@ def ergebnis_html(e: dict, r: dict, fach: bool = False) -> str:
                "<td style='color:gray'>Leistung</td><td></td></tr>"
         ee = einstellung_aus(e)
         rot_u, gelb_u, gelb_o, rot_o = ee.grenzen()
-        kabel = e.get("kabel_mohm", 0) / 1000
+        kabel = 0.0     # wie im Urteil: bewertet wird die Spannung am Kabelende
 
         def zustand(s: dict) -> str:
             v = s["min_v"] + s["strom"] * kabel
@@ -241,11 +249,22 @@ def ergebnis_html(e: dict, r: dict, fach: bool = False) -> str:
             d = s["max_v"] - s["min_v"]
             return f"<td style='color:{AMPEL[nt.schwank_ampel(ee, d)]}'>{d * 1000:.0f} mV</td>"
         kopf = kopf.replace("<td></td></tr>", "<td style='color:gray'>Schwankung</td><td></td></tr>")
+        r_kabel = (e.get("kabel_mohm") or 0) / 1000
+        if r_kabel:
+            kopf = kopf.replace("<td style='color:gray'>Schwankung</td>",
+                                "<td style='color:gray'>im Kabel verloren</td><td style='color:gray'>Schwankung</td>")
+
+        def verlust(s: dict) -> str:
+            if not r_kabel:
+                return ""
+            w = s["strom"] ** 2 * r_kabel
+            ges = s["spannung"] * s["strom"] + w
+            return f"<td>{zahl(w, 2)} W ({zahl(w / ges * 100 if ges else 0, 1)} %)</td>"
         reihen = "".join(
             f"<tr><td>{zahl(s['soll_a'], 2)} A</td><td>{zahl(s['spannung'], 3)} V</td>"
             f"<td>{zahl(s['min_v'], 3)} V</td>"
             + (f"<td>{zahl(s.get('buchse_v'), 3)} V</td>" if buchse else "") +
-            f"<td>{zahl(s['spannung'] * s['strom'], 1)} W</td>" + schwank(s) + zustand(s) + "</tr>"
+            f"<td>{zahl(s['spannung'] * s['strom'], 1)} W</td>" + verlust(s) + schwank(s) + zustand(s) + "</tr>"
             for s in stufen)
         zeilen.append("<b>Kennlinie</b><table cellspacing=6>" + kopf + reihen + "</table>")
     for h in r.get("hinweise") or []:
@@ -614,18 +633,35 @@ class NetzteilReiter(QWidget):
         self.bild_t.setLabel("left", "Temperatur (°C)", color="#d03b3b")
         self.linie_t = self.bild_t.plot([], [], pen=pg.mkPen("#d03b3b", width=2))
         self._mit_temp = False
-        for b in (self.bild, self.bild_i, self.bild_t):
+        # Kabelverlust (nur mit Kabelwert): Watt links, Anteil an der Leistung des Netzteils rechts
+        self.bild_k = pg.PlotItem()
+        self.bild_k.setLabel("left", "Kabelverlust (W)", color="#9b51e0")
+        self.bild_k.setLabel("right", "Anteil (%)", color="#0a9bb0")
+        self.linie_kw = self.bild_k.plot([], [], pen=pg.mkPen("#9b51e0", width=2))
+        self.box_k = pg.ViewBox()
+        self.flaeche.scene().addItem(self.box_k)
+        self.box_k.hide()                              # erst sichtbar mit dem Streifen
+        self.bild_k.getAxis("right").linkToView(self.box_k)
+        self.box_k.setXLink(self.bild_k)
+        self.linie_kp = pg.PlotCurveItem([], [], pen=pg.mkPen("#0a9bb0", width=1.5, style=Qt.DashLine))
+        self.box_k.addItem(self.linie_kp)
+        self.bild_k.vb.sigResized.connect(lambda: self.box_k.setGeometry(self.bild_k.vb.sceneBoundingRect()))
+        self._mit_kabel = False
+        self._kabel_r = 0.0
+        for b in (self.bild, self.bild_i, self.bild_t, self.bild_k):
             b.showGrid(x=True, y=True, alpha=0.25)
             self.f._ohne_vorsatz(b)
             b.getAxis("left").setWidth(62)              # Streifen bündig untereinander
         self.bild_i.getAxis("right").enableAutoSIPrefix(False)
-        for b in (self.bild, self.bild_i, self.bild_t):   # rechts gleich breit, sonst nicht bündig
+        self.bild_k.getAxis("right").enableAutoSIPrefix(False)
+        for b in (self.bild, self.bild_i, self.bild_t, self.bild_k):   # rechts gleich breit, sonst nicht bündig
             b.showAxis("right")
             b.getAxis("right").setWidth(48)
         for b in (self.bild, self.bild_t):
             b.getAxis("right").setStyle(showValues=False)
         self.bild_i.setXLink(self.bild)
         self.bild_t.setXLink(self.bild)
+        self.bild_k.setXLink(self.bild)
         self.bild.hideAxis("bottom")
         self.bild_i.setLabel("bottom", "Zeit (min)")
         lay = self.flaeche.ci.layout
@@ -889,7 +925,8 @@ class NetzteilReiter(QWidget):
         e = self.einstellung()
         teile = []
         if self.schnell.isChecked():
-            self.angabe_hinweis.setText("USB-PD/QC: erlaubt ±5 % um die jeweilige Spannung")
+            self.angabe_hinweis.setText("5 V: 4,75–5,25 V (USB 2.0). 9–20 V: ±5 %, kurzzeitig höchstens 0,5 V mehr (USB-PD §7.1.8). "
+                                        "Für QC gibt es keine öffentliche Vorgabe – es gelten dieselben Grenzen")
             self._dauer_zeigen()
             return
         if e.nenn_v > 0:
@@ -1023,6 +1060,7 @@ class NetzteilReiter(QWidget):
         e = nt.NetzteilEinstellung("Kabelmessung", 5.0, 2.0, stufen=4, stufe_s=10, dauertest=False,
                                    abschalttest=False, fuehler=False)
         self._kabel_messung = True
+        self._kabel_r = 0.0
         self.ablauf = nt.NetzteilAblauf(e, g, bei_ereignis=lambda a, t: self.f.b.ereignis.emit("nt:" + a, t))
         self._nenn_v, self._geplant_s = 5.0, sum(x.dauer_s for x in self.ablauf.schritte) + 5
         self.ergebnis.hide()
@@ -1066,6 +1104,7 @@ class NetzteilReiter(QWidget):
                 QMessageBox.warning(self, "Prüfen", f"{_kurz(e.nenn_v)} V: {fehler}")
                 return
         melden = lambda a, t: self.f.b.ereignis.emit("nt:" + a, t)
+        self._kabel_r = self.einstellung().kabel_mohm / 1000
         if self.schnell.isChecked():
             self.ablauf = nt.TriggerAblauf(self.einstellung(), self._trigger_stufen(), g, bei_ereignis=melden)
             self._grenzen_zeigen(None)
@@ -1178,20 +1217,49 @@ class NetzteilReiter(QWidget):
         self.linie_i.setData(x, [p[2] for p in punkte])
         self.linie_p.setData(x, [p[1] * p[2] for p in punkte])
         mit = [(xx, p[3]) for xx, p in zip(x, punkte) if len(p) > 3 and p[3] is not None]
-        if mit and not self._mit_temp:
-            self.flaeche.addItem(self.bild_t, row=2, col=0)
-            self.flaeche.ci.layout.setRowStretchFactor(2, 2)
-            self.bild_i.setLabel("bottom", "")
-            self.bild_i.hideAxis("bottom")
-            self.bild_t.setLabel("bottom", "Zeit (min)")
-            self._mit_temp = True
-        elif not mit and self._mit_temp:
-            self.flaeche.removeItem(self.bild_t)
-            self.bild_i.showAxis("bottom")
-            self.bild_i.setLabel("bottom", "Zeit (min)")
-            self._mit_temp = False
+        kabel = bool(self._kabel_r)
+        if bool(mit) != self._mit_temp or kabel != self._mit_kabel:
+            self._streifen(kabel, bool(mit))
         self.linie_t.setData([a for a, _ in mit], [b for _, b in mit])
+        if kabel:
+            # Verlust im Kabel: I²·R; Anteil an dem, was das Netzteil abgibt (am DL24 + im Kabel)
+            kw = [p[2] ** 2 * self._kabel_r for p in punkte]
+            ant = [w / (p[1] * p[2] + w) * 100 if p[2] > 0.01 and p[1] * p[2] + w > 0 else 0.0
+                   for w, p in zip(kw, punkte)]
+            self.linie_kw.setData(x, kw)
+            self.linie_kp.setData(x, ant)
+            self.box_k.enableAutoRange(y=True)
+        else:
+            self.linie_kw.setData([], [])
+            self.linie_kp.setData([], [])
         self.box_p.enableAutoRange(y=True)
+
+    def _streifen(self, kabel: bool, temp: bool) -> None:
+        """Unter Strom/Leistung: Kabelverlust (mit Kabelwert), dann Temperatur (mit Fühler).
+        Die Zeitachse steht am untersten Streifen."""
+        for b, da in ((self.bild_k, self._mit_kabel), (self.bild_t, self._mit_temp)):
+            if da:
+                self.flaeche.removeItem(b)
+        zeile = 2
+        unten = [self.bild_i]
+        for b, an in ((self.bild_k, kabel), (self.bild_t, temp)):
+            if an:
+                self.flaeche.addItem(b, row=zeile, col=0)
+                self.flaeche.ci.layout.setRowStretchFactor(zeile, 2)
+                unten.append(b)
+                zeile += 1
+        for b in (self.bild_i, self.bild_k, self.bild_t):
+            if b is unten[-1]:
+                b.showAxis("bottom")
+                b.setLabel("bottom", "Zeit (min)")
+            else:
+                b.setLabel("bottom", "")
+                b.hideAxis("bottom")
+        self.box_k.setVisible(kabel)
+        self.flaeche.setMinimumHeight(380 + 100 * kabel)
+        # die zweite Skala sitzt erst richtig, wenn der Streifen Platz bekommen hat
+        QTimer.singleShot(0, lambda: self.box_k.setGeometry(self.bild_k.vb.sceneBoundingRect()))
+        self._mit_kabel, self._mit_temp = kabel, temp
 
     def _marken_zeichnen(self, marken: list, neu: bool = False) -> None:
         """Senkrechte Linien an jedem Stufenwechsel, beschriftet mit dem Strom."""
@@ -1203,7 +1271,7 @@ class NetzteilReiter(QWidget):
             self._marken = []
             self._marken_unten = []
         for t, text in marken[len(self._marken):]:
-            for b in (self.bild_i, self.bild_t):
+            for b in (self.bild_i, self.bild_t, self.bild_k):
                 unten = pg.InfiniteLine(pos=t / 60, angle=90, movable=False,
                                         pen=pg.mkPen((128, 128, 128, 110), width=1, style=Qt.DashLine))
                 b.addItem(unten)
@@ -1372,6 +1440,7 @@ class NetzteilReiter(QWidget):
         self.ergebnis.show()
         self.ergebnis_rahmen.show()
         k = d["kurve"]
+        self._kabel_r = (d["einstellung"].get("kabel_mohm") or 0) / 1000
         self._nenn_v = None if d["einstellung"].get("trigger") else d["einstellung"]["nenn_v"]
         self._kurven(k)
         self.bild.enableAutoRange(x=True)
@@ -1465,7 +1534,9 @@ class NetzteilReiter(QWidget):
             "<p style='color:gray'>Oben: gemessene Spannung (blau) mit festen Farbbereichen – "
             "<span style='color:#2e9e4f'>grün</span> = in Ordnung, <span style='color:#c77700'>gelb</span> = außerhalb "
             "der Vorgabe, aber nutzbar, <span style='color:#d03b3b'>rot</span> = zu niedrig bzw. zu hoch. Gemessen "
-            "am Kabelende, also so, wie es beim Gerät ankommt. Mitte: Strom und Leistung. Unten: Temperatur, wenn ein Fühler angebracht war.</p>"
+            "am Kabelende, also so, wie es beim Gerät ankommt. Mitte: Strom und Leistung. Darunter, wenn ein "
+            "Kabelwert eingetragen war: Verlust im Kabel in Watt (lila) und als Anteil an der Leistung des Netzteils "
+            "in Prozent (türkis gestrichelt). Unten: Temperatur, wenn ein Fühler angebracht war.</p>"
             f"<h3>Messwerte für Fachleute</h3>{ergebnis_html(e, r, fach=True)}"
             "<p style='color:gray'><b>Schwankung</b> = Unterschied zwischen höchstem und tiefstem Wert innerhalb "
             "einer Stufe. Grün bis 1 %, gelb bis 3 %, rot darüber – das ist eine Einschätzung dieser Software, keine "
@@ -1524,7 +1595,7 @@ class NetzteilReiter(QWidget):
     def _hell_abfotografieren(self):
         """Das Diagramm fürs PDF immer hell - dunkel lässt es sich schlecht drucken."""
         vorne = pg.getConfigOption("foreground")
-        achsen = [b.getAxis(a) for b in (self.bild, self.bild_i, self.bild_t)
+        achsen = [b.getAxis(a) for b in (self.bild, self.bild_i, self.bild_t, self.bild_k)
                   for a in ("left", "bottom", "right")]
         self.flaeche.setBackground("w")
         for a in achsen:
