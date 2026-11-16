@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.25 – 16.11.2026
+
+- Diagramm zeigt die **gemessene Spannung** (durchgezogen) und – mit Kabelwert –
+  zusätzlich die **berechnete an der Buchse** (gestrichelt), mit Legende. Vorher
+  stand nur die berechnete da, die nicht zur Anzeige oben passte. Oben steht
+  während der Prüfung „(Buchse x V)“ dahinter.
+- **Unplausibler Kabelwert** (größer als der gesamte gemessene Widerstand,
+  z. B. am geprüften Gerät statt an einem guten Ladegerät gemessen) wird nicht
+  herausgerechnet – mit Hinweis im Bericht. Sonst sähe ein schwaches Gerät
+  perfekt aus.
+- **Überspannung** über die ganze Prüfung: nicht nur der Leerlauf, sondern der
+  höchste gemessene Wert, auch Spitzen beim Lastwechsel. USB: über 5,25 V gelb
+  (entspricht nicht der Vorgabe), über 5,5 V rot (kann Geräte beschädigen).
+
 ## 1.0.24 – 15.11.2026
 
 - **Temperaturfühler richtig zugeordnet:** Am echten DL24P (Firmware 1.1.0)

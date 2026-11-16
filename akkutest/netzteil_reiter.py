@@ -507,7 +507,9 @@ class NetzteilReiter(QWidget):
         self.flaeche.setMinimumHeight(380)
         self.bild = self.flaeche.addPlot(row=0, col=0)
         self.bild.setLabel("left", "Spannung (V)")
-        self.linie = self.bild.plot([], [], pen=pg.mkPen("#2f80ed", width=2))
+        self.legende = self.bild.addLegend(offset=(-10, 10))
+        self.linie = self.bild.plot([], [], pen=pg.mkPen("#2f80ed", width=2), name="gemessen (am DL24)")
+        self.linie_b = self.bild.plot([], [], pen=pg.mkPen("#2e9e4f", width=2, style=Qt.DashLine))
         self.grenze = pg.InfiniteLine(angle=0, pen=pg.mkPen("#c77700", width=1, style=Qt.DashLine))
         self.grenze.hide()
         self.bild.addItem(self.grenze)
@@ -927,6 +929,7 @@ class NetzteilReiter(QWidget):
             self.grenze.hide()
             self._kabel_ohm = 0.0
             self.bild.setLabel("left", "Spannung (V)")
+            self.legende.removeItem(self.linie_b)
             return
         rot_u, gelb_u, gelb_o, rot_o = e.grenzen()
         weit = e.nenn_v * 10 + 50
@@ -937,14 +940,25 @@ class NetzteilReiter(QWidget):
         self.grenze.setValue(gelb_u)
         self.grenze.show()
         self._kabel_ohm = e.kabel_mohm / 1000
-        self.bild.setLabel("left", "Spannung an der Buchse (V)" if e.kabel_mohm else "Spannung (V)")
+        self.bild.setLabel("left", "Spannung (V)")
+        self.legende.removeItem(self.linie_b)
+        if e.kabel_mohm:
+            self.legende.addItem(self.linie_b, f"an der Buchse (berechnet, Kabel {e.kabel_mohm:.0f} mΩ)")
 
     def _kurven(self, punkte: list) -> None:
         """Alle Streifen aus den Punkten (s, V, A, °C oder None)."""
         x = [p[0] / 60 for p in punkte]
-        # Mit Kabelwert: die Spannung an der Buchse - nur so passt sie zur Ampel
-        v = [p[1] + p[2] * self._kabel_ohm for p in punkte]
-        self.linie.setData(x, v)
+        # Gemessen wird am DL24; mit Kabelwert zusätzlich gestrichelt die berechnete
+        # Spannung an der Buchse - die Ampel gilt für die Buchse
+        gemessen = [p[1] for p in punkte]
+        self.linie.setData(x, gemessen)
+        if self._kabel_ohm:
+            v = [p[1] + p[2] * self._kabel_ohm for p in punkte]
+            self.linie_b.setData(x, v)
+        else:
+            v = gemessen
+            self.linie_b.setData([], [])
+        v = v + gemessen
         # Spannungsachse nach dem Betrieb, nicht nach dem Einbruch auf 0 beim Abschalten -
         # sonst werden die Stufen platt
         if self._nenn_v and v:
@@ -999,7 +1013,10 @@ class NetzteilReiter(QWidget):
 
     def messwert(self, m: Messwert) -> None:
         stellen = self.f.geraet.spannung_stellen if self.f.geraet else 3
-        self.anz["u"].setzen(zahl(m.spannung, stellen, "V"))
+        text = zahl(m.spannung, stellen, "V")
+        if self._kabel_ohm and m.strom > 0.01 and self.laeuft:
+            text += f"  (Buchse {zahl(m.spannung + m.strom * self._kabel_ohm, 2)} V)"
+        self.anz["u"].setzen(text)
         self.anz["i"].setzen(zahl(m.strom, 3, "A"))
         self.anz["p"].setzen(zahl(m.leistung, 2, "W"))
         if not self.mit_fuehler.isChecked():

@@ -212,6 +212,8 @@ class NetzteilErgebnis:
     laien: list[str] = field(default_factory=list)   # dasselbe in einfachen Sätzen, für den Bericht
     spez_verletzt: bool = False            # USB: Spannung nachweislich außerhalb der Spezifikation
     schwankung_mv: float | None = None     # größte Schwankung einer Stufe bis zum Nennstrom
+    kabel_unplausibel: bool = False        # Kabelwert größer als der ganze Widerstand - falsch gemessen
+    spitze_v: float | None = None          # höchste Spannung der ganzen Prüfung (Leerlauf, Lastwechsel)
     unter_ab_a: float | None = None        # ab diesem Strom unter der gelben Grenze (USB 4,75 V)
     rot_ab_a: float | None = None          # ab diesem Strom unter der roten Grenze (USB 4,40 V)
 
@@ -299,11 +301,20 @@ def bewerten(e: NetzteilEinstellung, r: NetzteilErgebnis) -> None:
     if r.dauer:
         bis_nenn.append(r.dauer)
     r.widerstand_mohm = widerstand([x for x in r.stufen if x.soll_a <= e.strom_a + 1e-6] or r.stufen)
+    # Ist der Kabelwert so groß wie der ganze gemessene Widerstand, wurde er nicht an einem
+    # guten Ladegerät bestimmt - dann würde er dem Gerät seinen eigenen Verlust gutschreiben
+    r.kabel_unplausibel = bool(kabel and r.widerstand_mohm is not None
+                               and e.kabel_mohm > r.widerstand_mohm * 1.05 + 10)
+    if r.kabel_unplausibel:
+        kabel = 0.0
     untere = USB_MIN_V if e.usb else e.untere_v
     in_tol = [x for x in r.stufen if an_buchse(x, x.min_v) >= untere]
     r.max_w_tol = round(max((x.spannung * x.strom for x in in_tol), default=0), 2) or None
     r.max_w = round(max((x.spannung * x.strom for x in r.stufen), default=0), 2) or None
     gruende: list[str] = []
+    if r.kabel_unplausibel:
+        gruende.append(f"Kabelwert {_k(e.kabel_mohm, 0)} mΩ ist größer als der gesamte gemessene Widerstand "
+                       f"({_k(r.widerstand_mohm, 0)} mΩ) – nicht herausgerechnet")
     schlimm = knapp = offen = False
     r.spez_verletzt = False
     rot_u, gelb_u, _, _ = e.grenzen()
@@ -314,18 +325,20 @@ def bewerten(e: NetzteilEinstellung, r: NetzteilErgebnis) -> None:
         wo = "an der Buchse" if kabel else "am Kabelende"
         gruende.append(f"Unter {_k(gelb_u)} V {wo} ab {_k(r.unter_ab_a)} A"
                        + (f", unter {_k(rot_u)} V ab {_k(r.rot_ab_a)} A" if r.rot_ab_a is not None else ""))
-    ll = r.leerlauf_v
-    if ll is not None and e.usb and ll > GEFAHR_V:
-        schlimm = r.spez_verletzt = True
-        gruende.append(f"Leerlauf {_k(ll)} V – über {_k(USB_MAX_V)} V ({SPEZ} §7.2.2) und über {_k(GEFAHR_V)} V: "
-                       "kann angeschlossene Geräte beschädigen")
-    elif ll is not None and e.usb and ll > USB_MAX_V:
-        knapp = r.spez_verletzt = True
-        gruende.append(f"Leerlauf {_k(ll)} V – über {_k(USB_MAX_V)} V ({SPEZ} §7.2.2)")
-    elif ll is not None and not e.usb and ll > e.hoechst_v:
+    # Überspannung: der höchste Wert der ganzen Prüfung - Leerlauf und Spitzen beim Lastwechsel
+    hoch = max(x for x in (r.leerlauf_v, r.spitze_v) if x is not None) if (r.leerlauf_v or r.spitze_v) else None
+    _, _, gelb_o, rot_o = e.grenzen()
+    if hoch is not None and hoch > rot_o:
         schlimm = True
-        gruende.append(f"Zu hohe Spannung im Leerlauf ({_k(ll)} V, höchstens {_k(e.hoechst_v)} V) – "
-                       "kann angeschlossene Geräte beschädigen")
+        r.spez_verletzt = r.spez_verletzt or e.usb
+        gruende.append(f"Überspannung: bis {_k(hoch)} V gemessen – über {_k(rot_o)} V"
+                       + (f" (USB-Vorgabe höchstens {_k(USB_MAX_V)} V, {SPEZ} §7.2.2)" if e.usb else "")
+                       + ", kann angeschlossene Geräte beschädigen")
+    elif hoch is not None and hoch > gelb_o:
+        knapp = True
+        r.spez_verletzt = r.spez_verletzt or e.usb
+        gruende.append(f"Überspannung: bis {_k(hoch)} V gemessen – über {_k(gelb_o)} V"
+                       + (f" ({SPEZ} §7.2.2)" if e.usb else ""))
     tiefst = None
     if e.unbekannt:
         r.verspricht = None
@@ -394,7 +407,7 @@ def laien_saetze(e: NetzteilEinstellung, r: NetzteilErgebnis, tiefst: float | No
     """Für Leute ohne Fachwissen: was heißt das Ergebnis im Alltag?"""
     art = "das Gerät"
     versprochen_w = e.nenn_v * e.strom_a
-    kabel = bool(e.kabel_mohm)
+    kabel = bool(e.kabel_mohm) and not r.kabel_unplausibel
     s: list[str] = []
     if e.unbekannt:
         if r.max_w_tol:
@@ -439,6 +452,11 @@ def laien_saetze(e: NetzteilEinstellung, r: NetzteilErgebnis, tiefst: float | No
                      f"(mindestens {_k(e.untere_v)} Volt).")
         else:
             s.append(f"Die Spannung bleibt dabei im erwarteten Bereich (mindestens {_k(tiefst)} Volt).")
+    if r.kabel_unplausibel:
+        s.append(f"Der eingetragene Kabelwert ({_k(e.kabel_mohm, 0)} mΩ) ist größer als der gesamte gemessene "
+                 "Widerstand. Er wurde wahrscheinlich nicht an einem guten Ladegerät gemessen, sondern an diesem "
+                 "Gerät – dann würde er dessen eigene Schwäche dem Kabel zuschreiben. Er wurde deshalb nicht "
+                 "herausgerechnet.")
     if r.unter_ab_a is not None and not e.unbekannt:
         rot_u, gelb_u, _, _ = e.grenzen()
         ueber = " – also schon unterhalb der Angabe" if r.unter_ab_a < e.strom_a - 1e-6 else (
@@ -453,13 +471,15 @@ def laien_saetze(e: NetzteilEinstellung, r: NetzteilErgebnis, tiefst: float | No
         else:
             s.append(f"Am Ende des Kabels fiel die Spannung ab {_k(r.unter_ab_a)} Ampere unter {_k(gelb_u)} Volt"
                      f"{ueber}. Ob das am Gerät oder am Kabel liegt, ist ohne Kabelwert noch offen.")
-    ll = r.leerlauf_v
-    if ll is not None and e.usb and ll > USB_MAX_V:
-        s.append(f"Ohne angeschlossenes Gerät liefert es {_k(ll)} Volt; die {SPEZ} erlaubt höchstens "
-                 f"{_k(USB_MAX_V)} Volt." + (" Das kann angeschlossene Geräte beschädigen." if ll > GEFAHR_V else ""))
-    elif ll is not None and not e.usb and ll > e.hoechst_v:
-        s.append(f"Ohne angeschlossenes Gerät liefert es {_k(ll)} Volt – zu viel. Das kann angeschlossene "
-                 "Geräte beschädigen.")
+    hoch = max(x for x in (r.leerlauf_v, r.spitze_v) if x is not None) if (r.leerlauf_v or r.spitze_v) else None
+    _, _, gelb_o, rot_o = e.grenzen()
+    if hoch is not None and hoch > gelb_o:
+        wann = "ohne angeschlossenes Gerät" if r.leerlauf_v and hoch <= r.leerlauf_v + 0.005 else \
+            "zeitweise (z. B. wenn die Last wegfällt)"
+        vorgabe = f"die {SPEZ} erlaubt höchstens {_k(USB_MAX_V)} Volt" if e.usb else \
+            f"angegeben sind {_k(e.nenn_v, None)} Volt"
+        s.append(f"Überspannung: Es lieferte {wann} bis zu {_k(hoch)} Volt; {vorgabe}."
+                 + (" So viel kann angeschlossene Geräte beschädigen." if hoch > rot_o else ""))
     if r.schwankung_mv is not None and schwank_ampel(e, r.schwankung_mv / 1000) == "rot":
         s.append(f"Die Spannung ist unruhig: Sie schwankt bei gleicher Last um {_k(r.schwankung_mv, 0)} "
                  "Millivolt. Ein gutes Netzteil hält sie deutlich ruhiger.")
@@ -551,6 +571,7 @@ class NetzteilAblauf:
             return
         r = self.ergebnis
         r.leerlauf_v = round(sum(self._ll) / len(self._ll), 3)
+        r.spitze_v = max(self._ll)
         r.temp_start = m.temp_fuehler if e.fuehler else None
         if r.leerlauf_v < e.nenn_v * ZUSAMMENBRUCH:
             self._beenden(f"Keine Spannung am Eingang ({_k(r.leerlauf_v, 2)} V statt {e.nenn_v:g} V). "
@@ -594,6 +615,7 @@ class NetzteilAblauf:
         t = m.zeit - (self._t0 or m.zeit)
         r.dauer_s = t
         temp = m.temp_fuehler if e.fuehler else None    # Fühler abgewählt: Temperatur ignorieren
+        r.spitze_v = m.spannung if r.spitze_v is None else max(r.spitze_v, m.spannung)
         self.punkte.append((round(t, 1), m.spannung, m.strom, temp))
         if temp is not None:
             r.temp_max = temp if r.temp_max is None else max(r.temp_max, temp)

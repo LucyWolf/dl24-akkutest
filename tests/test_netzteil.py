@@ -198,6 +198,10 @@ def test_urteil_mit_und_ohne_kabel():
         knapp.laien
     assert any("Ob das am Gerät oder am Kabel liegt" in t for t in ohne.laien), ohne.laien
     assert any("einzelner Port des Hubs" in t and "10 Watt" in t for t in ohne.laien), ohne.laien
+    # Kabelwert am Hub selbst "gemessen" (so groß wie alles) - nicht herausrechnen, kein Urteil
+    falsch = hub(420)
+    assert falsch.kabel_unplausibel and falsch.urteil == "offen", (falsch.urteil, falsch.gruende)
+    assert any("nicht herausgerechnet" in t for t in falsch.laien)
     assert any("§7.2.2" in g for g in knapp.gruende)
     tief = SimNetzteil(5.0, innen_mohm=600, abschalt_a=9)
     e = nt.NetzteilEinstellung("Mies", 5.0, 2.0, stufen=2, stufe_s=10, dauertest=False, kabel_mohm=100)
@@ -209,8 +213,13 @@ def test_zu_hohe_spannung():
     q = SimNetzteil(5.6, innen_mohm=50, abschalt_a=9)
     e = nt.NetzteilEinstellung("Billig", 5.0, 1.0, stufen=2, stufe_s=10, dauertest=False, toleranz_proz=20)
     r = durchspielen(q, e)[0].ergebnis
-    assert r.urteil == "nicht" and "Leerlauf" in r.gruende[0] and r.spez_verletzt, r.gruende
-    assert any("höchstens 5,25 Volt" in t and "beschädigen" in t for t in r.laien), r.laien
+    assert r.urteil == "nicht" and "Überspannung" in r.gruende[0] and r.spez_verletzt, r.gruende
+    assert any("Überspannung" in t and "höchstens 5,25 Volt" in t and "beschädigen" in t for t in r.laien), r.laien
+    # leicht drüber (5,3 V): gelb - entspricht nicht der Vorgabe, aber nicht gefährlich
+    q = SimNetzteil(5.25, innen_mohm=50, abschalt_a=9)
+    r = durchspielen(q, nt.NetzteilEinstellung("Etwas hoch", 5.0, 1.0, stufen=2, stufe_s=10, dauertest=False,
+                                                kabel_mohm=50))[0].ergebnis
+    assert r.urteil == "eingeschraenkt" and r.spez_verletzt and r.spitze_v > 5.25, (r.urteil, r.spitze_v)
 
 
 def test_maximum_suchen():
