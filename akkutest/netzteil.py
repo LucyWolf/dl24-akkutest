@@ -163,6 +163,16 @@ def ermitteln(e: NetzteilEinstellung, usb: bool) -> NetzteilEinstellung:
                                   "stufe_s": SUCH_STUFE_S, "dauertest": False, "abschalttest": False})
 
 
+def duennen(punkte: list, hoechstens: int = 1500) -> list:
+    """Kurve für die Ablage: lange Prüfungen auf höchstens so viele Punkte."""
+    if len(punkte) <= hoechstens:
+        return [list(p) for p in punkte]
+    schritt = len(punkte) / hoechstens
+    aus = [list(punkte[int(i * schritt)]) for i in range(hoechstens)]
+    aus[-1] = list(punkte[-1])
+    return aus
+
+
 # Kabel: erlaubter Widerstand Hin + Rück, Stecker eingerechnet.
 # USB-C (Type-C Cable and Connector Specification §4.4.1): höchstens 500 mV auf VBUS und
 # 250 mV auf GND bei vollem Nennstrom -> 750 mV / 3 A = 250 mΩ, / 5 A = 150 mΩ.
@@ -462,7 +472,7 @@ def laien_saetze(e: NetzteilEinstellung, r: NetzteilErgebnis, tiefst: float | No
     if tiefst is not None and e.usb:
         if tiefst >= USB_MIN_V:
             s.append(f"Die Spannung bleibt dabei im Bereich, den die {SPEZ} vorgibt: mindestens "
-                     f"{_k(USB_MIN_V)} Volt (gemessen: {_k(tiefst)} Volt). Angeschlossene Geräte werden "
+                     f"{_k(USB_MIN_V)} Volt ({'an der Buchse' if kabel else 'gemessen'}: {_k(tiefst)} Volt). Angeschlossene Geräte werden "
                      "zuverlässig versorgt.")
         elif not kabel:
             s.append(f"Am Ende des USB-Kabels kamen unter Last nur {_k(tiefst)} Volt an. Die {SPEZ} verlangt "
@@ -904,7 +914,8 @@ class TriggerAblauf:
             self.bei_ereignis(art, f"{v:g} V – {text}")
             return
         t = self.teil
-        self.ergebnis.teile.append({"einstellung": dict(t.einstellung.__dict__), "ergebnis": t.ergebnis.als_dict()})
+        self.ergebnis.teile.append({"einstellung": dict(t.einstellung.__dict__), "ergebnis": t.ergebnis.als_dict(),
+                                    "kurve": duennen(t.punkte)})          # eigenes Diagramm je Spannung
         if t.zustand == "abgebrochen" and t.ergebnis.leerlauf_v is not None:
             # von Hand oder Fehler: alles beenden
             self.zustand = "abgebrochen"
@@ -919,7 +930,8 @@ class TriggerAblauf:
             self.teil.bei_ereignis = lambda a, t: None
             self.teil.abbrechen()
             self.ergebnis.teile.append({"einstellung": dict(self.teil.einstellung.__dict__),
-                                        "ergebnis": self.teil.ergebnis.als_dict()})
+                                        "ergebnis": self.teil.ergebnis.als_dict(),
+                                        "kurve": duennen(self.teil.punkte)})
         else:
             try:
                 self.geraet.last(False)

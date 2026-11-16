@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.32 – 16.11.2026
+
+- **Bericht mit allen Diagrammen:** Bei Schnellladegeräten steht für jede
+  Spannung ein eigenes, vollständiges Diagramm im Bericht – mit eigener Achse,
+  Ampel und Stufenmarken. Vorher war es ein einziges Bildschirmfoto, in dem
+  alle Spannungen zusammengedrückt waren.
+- Im Bericht hieß es „gemessen: 5,12 V“, obwohl der Wert um das Kabel
+  hochgerechnet war – jetzt steht „an der Buchse“, wenn es so ist.
+
 ## 1.0.31 – 16.11.2026
 
 - Eigenes Anzeigefeld **„Widerstand (Netzteil + Kabel)“** in mΩ: laufend aus

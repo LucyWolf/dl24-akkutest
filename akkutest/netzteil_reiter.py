@@ -1301,6 +1301,7 @@ class NetzteilReiter(QWidget):
         if ab.ergebnis.dauer_s >= 5:
             self.f.speicher.netzteil_speichern(ab.einstellung, ab.ergebnis, ab.punkte, ab.start_wann)
             self.verlauf_laden()
+        self._angezeigt_kurve = [list(p) for p in ab.punkte]
         self._zeigen(ab.einstellung.__dict__, ab.ergebnis.als_dict(), ab.start_wann)
         self.ergebnis.show()
         self.ergebnis_rahmen.show()
@@ -1374,6 +1375,7 @@ class NetzteilReiter(QWidget):
         d = self._gewaehlt()
         if not d or self.laeuft:
             return
+        self._angezeigt_kurve = d["kurve"]
         self._zeigen(d["einstellung"], d["ergebnis"], d["wann"])
         self.ergebnis.show()
         self.ergebnis_rahmen.show()
@@ -1409,9 +1411,43 @@ class NetzteilReiter(QWidget):
         from PySide6.QtCore import QUrl
         from PySide6.QtGui import QTextDocument
         doc = QTextDocument()
-        doc.addResource(QTextDocument.ImageResource, QUrl("kurve.png"), self._hell_abfotografieren())
+        self._bilder = self._diagramme(e, r)
+        for i, (_, bild) in enumerate(self._bilder):
+            doc.addResource(QTextDocument.ImageResource, QUrl(f"kurve{i}.png"), bild)
         doc.setHtml(self._bericht_html(e, r))
         return doc
+
+    def _diagramme(self, e: dict, r: dict) -> list:
+        """Ein vollständiges Diagramm je Prüfung - bei Schnellladegeräten je Spannung,
+        jedes mit eigener Achse, Ampel und Stufenmarken. Gezeichnet im selben Diagramm
+        wie auf dem Bildschirm, danach wird der Bildschirm wiederhergestellt."""
+        teile = [(f"{_kurz(t['einstellung']['nenn_v'])} V", t["einstellung"], t["ergebnis"], t.get("kurve"))
+                 for t in r.get("teile") or []]
+        if not teile:
+            teile = [("", e, r, getattr(self, "_angezeigt_kurve", None))]
+        bilder = []
+        vorher = (self._nenn_v, self._teil_ab, self._teil_gezeigt)
+        try:
+            for titel, te, tr, kurve in teile:
+                if not kurve:
+                    continue
+                self._grenzen_zeigen(einstellung_aus(te))
+                self._nenn_v, self._teil_ab = te["nenn_v"], 0
+                self._kurven(kurve)
+                self._marken_zeichnen([], neu=True)
+                self._marken_zeichnen(tr.get("marken") or [])
+                self.bild.enableAutoRange(x=True)
+                bilder.append((titel, self._hell_abfotografieren()))
+        finally:
+            # Bildschirm wie vorher: die angezeigte Prüfung als Ganzes
+            self._nenn_v, self._teil_ab, self._teil_gezeigt = vorher
+            ganz = getattr(self, "_angezeigt_kurve", None) or []
+            self._grenzen_zeigen(None if e.get("trigger") else einstellung_aus(e))
+            self._kurven(ganz)
+            self._marken_zeichnen([], neu=True)
+            self._marken_zeichnen(r.get("marken") or [])
+            self.bild.enableAutoRange(x=True)
+        return bilder
 
     def _bericht_html(self, e: dict, r: dict) -> str:
         breite = 640
@@ -1431,11 +1467,14 @@ class NetzteilReiter(QWidget):
             f"<h3>Kurz gesagt</h3>{kurz_html(e, r)}"
             f"<h3>Was wurde geprüft?</h3><p>{geprueft_text(e, r)}</p>"
             f"<h3>Messaufbau</h3>{messaufbau_html(e, r)}"
-            f"<p><img src='kurve.png' width='{breite}'></p>"
-            "<p style='color:gray'>Oben: Spannung mit Farbbereichen – <span style='color:#2e9e4f'>grün</span> = "
-            "in Ordnung, <span style='color:#c77700'>gelb</span> = außerhalb der Vorgabe, aber nutzbar, "
-            "<span style='color:#d03b3b'>rot</span> = zu niedrig bzw. zu hoch. Mitte: Strom und Leistung. "
-            "Unten: Temperatur, wenn ein Fühler angebracht war.</p>"
+            + "".join((f"<p><b>Diagramm {titel}</b></p>" if titel else "") +
+                      f"<p><img src='kurve{i}.png' width='{breite}'></p>"
+                      for i, (titel, _) in enumerate(getattr(self, "_bilder", []))) +
+            "<p style='color:gray'>Oben: gemessene Spannung (blau). Ohne Kabelwert mit Farbbereichen – "
+            "<span style='color:#2e9e4f'>grün</span> = in Ordnung, <span style='color:#c77700'>gelb</span> = außerhalb "
+            "der Vorgabe, aber nutzbar, <span style='color:#d03b3b'>rot</span> = zu niedrig bzw. zu hoch; mit Kabelwert "
+            "mit gestrichelten Grenzlinien, ans Kabelende umgerechnet – liegt die blaue Kurve darüber, reicht das "
+            "Gerät. Mitte: Strom und Leistung. Unten: Temperatur, wenn ein Fühler angebracht war.</p>"
             f"<h3>Messwerte für Fachleute</h3>{ergebnis_html(e, r, fach=True)}"
             "<p style='color:gray'><b>Schwankung</b> = Unterschied zwischen höchstem und tiefstem Wert innerhalb "
             "einer Stufe. Grün bis 1 %, gelb bis 3 %, rot darüber – das ist eine Einschätzung dieser Software, keine "

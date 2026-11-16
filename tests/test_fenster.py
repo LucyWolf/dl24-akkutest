@@ -431,6 +431,9 @@ def test_schnellladen_im_fenster():
     marken = [x.label.toPlainText() for x in f.nt._marken]
     assert marken[0] == "5 V 1,00 A" and any(m.startswith("9 V ") for m in marken), marken
     foto(f, "11-trigger-ergebnis")
+    assert [t for t, _ in f.nt._bilder] == ["5 V", "9 V"], f.nt._bilder      # ein Diagramm je Spannung
+    if FOTOS:
+        f.nt._bilder[1][1].save(str(FOTOS / "13-bericht-9V.png"))
     alle = sp.netzteil_tests()
     assert alle[0]["name"] == "Schnelllader" and f.nt.tabelle.item(0, 2).text() == "PD/QC 5/9 V", f.nt.tabelle.item(0, 2).text()
     assert f.nt.tabelle.item(0, 4).text().startswith("bis ")
