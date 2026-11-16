@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.26 – 16.11.2026
+
+- Die Anzeige oben zeigt nur noch die **gemessene** Spannung – die berechnete
+  „Buchse“-Angabe daneben konnte mit falschem Kabelwert Unsinn zeigen (mehr als
+  ohne Last).
+- Ergibt die Rechnung an der Buchse mehr als die Leerlaufspannung, ist der
+  Kabelwert falsch: Die gestrichelte Kurve wird sofort ausgeblendet, und es
+  erscheint der Hinweis, das Kabel neu zu messen.
+
 ## 1.0.25 – 16.11.2026
 
 - Diagramm zeigt die **gemessene Spannung** (durchgezogen) und – mit Kabelwert –

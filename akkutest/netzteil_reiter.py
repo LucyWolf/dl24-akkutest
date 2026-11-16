@@ -489,6 +489,12 @@ class NetzteilReiter(QWidget):
                                     ("t", "Temperatur (Fühler)")]):
             self.anz[k] = Anzeige(t)
             raster.addWidget(self.anz[k], 0, i)
+        self.kabel_warnung = QLabel("⚠ Kabelwert zu groß – an der Buchse käme mehr an als ohne Last. Die "
+                                    "berechnete Kurve ist ausgeblendet. Bitte mit „Kabel messen …“ an einem guten "
+                                    "Ladegerät neu bestimmen.")
+        self.kabel_warnung.setWordWrap(True)
+        self.kabel_warnung.setStyleSheet("color:#d03b3b; font-weight:bold;")
+        self.kabel_warnung.hide()
         self.schritt = QLabel()
         self.schritt.setWordWrap(True)
         self.schritt.setMinimumHeight(40)
@@ -499,6 +505,7 @@ class NetzteilReiter(QWidget):
         self.knopf_weiter.clicked.connect(self._ueberspringen)
         self.knopf_weiter.hide()
         raster.addWidget(self.knopf_weiter, 1, 3)
+        raster.addWidget(self.kabel_warnung, 2, 0, 1, 4)
         ol.addLayout(raster)
         # Ein Diagramm in drei Streifen mit gemeinsamer Zeitachse:
         # Spannung · Strom und Leistung · Temperatur (nur mit Fühler)
@@ -923,6 +930,7 @@ class NetzteilReiter(QWidget):
 
     def _grenzen_zeigen(self, e: nt.NetzteilEinstellung | None) -> None:
         """Ampelbänder und gelbe Linie für diese Einstellung - oder alles weg."""
+        self.kabel_warnung.hide()
         if e is None:
             for b in self.baender:
                 b.hide()
@@ -952,12 +960,19 @@ class NetzteilReiter(QWidget):
         # Spannung an der Buchse - die Ampel gilt für die Buchse
         gemessen = [p[1] for p in punkte]
         self.linie.setData(x, gemessen)
-        if self._kabel_ohm:
-            v = [p[1] + p[2] * self._kabel_ohm for p in punkte]
-            self.linie_b.setData(x, v)
-        else:
-            v = gemessen
-            self.linie_b.setData([], [])
+        v = gemessen
+        self.linie_b.setData([], [])
+        if self._kabel_ohm and punkte:
+            buchse = [p[1] + p[2] * self._kabel_ohm for p in punkte]
+            # Mehr als ohne Last geht an der Buchse nicht - dann ist der Kabelwert falsch
+            leer = max((p[1] for p in punkte if p[2] < 0.01), default=None)
+            if leer is not None and max(buchse) > leer + 0.02:
+                if not self.kabel_warnung.isVisible():
+                    self.kabel_warnung.show()
+            else:
+                self.kabel_warnung.hide()
+                self.linie_b.setData(x, buchse)
+                v = buchse
         v = v + gemessen
         # Spannungsachse nach dem Betrieb, nicht nach dem Einbruch auf 0 beim Abschalten -
         # sonst werden die Stufen platt
@@ -1013,10 +1028,7 @@ class NetzteilReiter(QWidget):
 
     def messwert(self, m: Messwert) -> None:
         stellen = self.f.geraet.spannung_stellen if self.f.geraet else 3
-        text = zahl(m.spannung, stellen, "V")
-        if self._kabel_ohm and m.strom > 0.01 and self.laeuft:
-            text += f"  (Buchse {zahl(m.spannung + m.strom * self._kabel_ohm, 2)} V)"
-        self.anz["u"].setzen(text)
+        self.anz["u"].setzen(zahl(m.spannung, stellen, "V"))
         self.anz["i"].setzen(zahl(m.strom, 3, "A"))
         self.anz["p"].setzen(zahl(m.leistung, 2, "W"))
         if not self.mit_fuehler.isChecked():

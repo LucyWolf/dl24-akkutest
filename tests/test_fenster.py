@@ -289,7 +289,16 @@ def test_netzteil_reiter():
     app.processEvents()
     assert "Empfehlenswert" in f.nt.ergebnis.text()
     assert "✔" in f.nt.tabelle.item(0, 3).text() and "Empfehlenswert" in f.nt.tabelle.item(0, 3).text()
-    # Kabel messen: kurzer Lauf, Wert landet im Feld, nicht in der Liste
+    # Zu großer Kabelwert: keine erfundene Buchsen-Spannung, sondern eine Warnung
+    f.nt._grenzen_zeigen(f.nt.einstellung())
+    f.nt._kabel_ohm = 0.5
+    f.nt._kurven([(0, 5.05, 0.0, None), (10, 4.9, 1.0, None), (20, 4.75, 2.0, None)])
+    assert f.nt.kabel_warnung.isVisible() and not f.nt.linie_b.getData()[0]
+    f.nt._kabel_ohm = 0.1
+    f.nt._kurven([(0, 5.05, 0.0, None), (10, 4.9, 1.0, None), (20, 4.75, 2.0, None)])
+    assert not f.nt.kabel_warnung.isVisible() and len(f.nt.linie_b.getData()[0]) == 3
+    f.nt._grenzen_zeigen(None)
+        # Kabel messen: kurzer Lauf, Wert landet im Feld, nicht in der Liste
     f.nt.kabel.setValue(500)                 # schon ein Wert drin - neu messen muss trotzdem gehen
     f.nt.kabel_messen()
     assert f.nt.laeuft
