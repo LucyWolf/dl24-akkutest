@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.39 – 16.11.2026
+
+- **Powerbank mit Schnellladen:** Mit dem Haken „Schnellladen“ prüft der
+  Powerbank-Reiter erst alle gewählten Spannungen über den Trigger-Adapter
+  (Stufentest, Grenzen nach USB bzw. USB-PD) und zum Schluss bei 5 V die
+  Kapazität bis leer. Die Energie aus den Spannungsstufen zählt zur Kapazität
+  dazu – gemessen wird ab voll. Beim Umschalten bleibt die Last mit dem
+  Mindeststrom an, damit die Powerbank nicht einschläft.
+- Die Vorlage INIU MegaPower 20000 setzt 5 V 3 A, 9 V 2,22 A und 12 V 1,5 A.
+
 ## 1.0.38 – 16.11.2026
 
 Enthält alles aus 1.0.36 und 1.0.37 – beide sind nie erschienen. Der Bau

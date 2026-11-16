@@ -299,6 +299,46 @@ def test_powerbank_wartet_auf_knopf():
     assert ab.zustand == "abgebrochen" and "eingeschaltet" in ab.ergebnis.grund, ab.ergebnis.grund
 
 
+def test_powerbank_mit_trigger():
+    # erst alle Spannungen, zum Schluss bei 5 V bis leer - die Energie davor zählt mit
+    from akkutest.simulator import SimDL24
+    q = SimPowerbank(wh=2.0)
+    v = SimulatorVerbindung(protokoll="hid", akku=q, tempo=200, bericht_s=0.02)
+    v.oeffnen()
+    g = Geraet(v, intervall=0.02)
+    assert g.erkennen(warten=0.2) == "hid"
+    fertig = threading.Event()
+    ev = []
+
+    def melden(a, t):
+        ev.append((a, t))
+        if a == "umschalten":
+            # der Mensch am Adapter: Spannung einstellen
+            ziel = float(t.split("jetzt ")[1].split(" V")[0])
+            threading.Timer(0.05, lambda: setattr(q, "nenn_v", ziel)).start()
+        if a == "fertig":
+            fertig.set()
+    e = pb(stufen=2, stufe_s=10, kapazitaet=True, kap_a=1.0, mah=600)
+    ab = nt.TriggerAblauf(e, [(5.0, 2.0), (9.0, 1.0)], g, bei_ereignis=melden)
+    g.bei_messwert = ab.messwert
+    g.starten()
+    assert fertig.wait(60), ev[-3:]
+    g.trennen()
+    r = ab.ergebnis
+    arten = [(t["einstellung"]["nenn_v"], t["einstellung"].get("kapazitaet")) for t in r.teile]
+    print("Powerbank mit Trigger:", r.grund, arten, r.urteil)
+    assert arten == [(5.0, False), (9.0, False), (5.0, True)], arten
+    neun = r.teile[1]["einstellung"]
+    assert neun["pd"] and neun["powerbank"] and not neun["kapazitaet"]
+    kap = r.teile[2]["ergebnis"]
+    vorher = r.teile[0]["ergebnis"]["energie_wh"] + r.teile[1]["ergebnis"]["energie_wh"]
+    assert vorher > 0 and kap["kap_leer"] and kap["energie_wh"] > vorher
+    assert 1.55 < kap["energie_wh"] < 1.8, kap["energie_wh"]       # alles ab voll, wie ohne Trigger
+    assert kap["zustand_proz"] and any("Darin enthalten" in h for h in kap["hinweise"])
+    assert "Kapazitätstest" in [t for a, t in ev if a == "umschalten"][-1]
+    assert r.haelt is True and r.urteil == "gut", (r.haelt, r.urteil)
+
+
 def test_zu_hohe_spannung():
     q = SimNetzteil(5.6, innen_mohm=50, abschalt_a=9)
     e = nt.NetzteilEinstellung("Billig", 5.0, 1.0, stufen=2, stufe_s=10, dauertest=False, toleranz_proz=20)

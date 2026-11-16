@@ -42,7 +42,10 @@ PB_ZUSTAND_GELB = 60.0
 PB_AUTOAUS_S = 180.0      # geht sie im Kapazitätstest früher aus, war es vielleicht die Abschaltautomatik
 PB_VORLAGEN = [
     # bekannte Modelle: Daten vom Hersteller (Aufdruck am Gerät geht vor)
-    ("INIU MegaPower 20000 (B5), USB-C", 5.0, 3.0, {"mah": 20000, "zell_v": 3.7, "wh": 74.0}),
+    ("INIU MegaPower 20000 (B5), USB-C", 5.0, 3.0, {"mah": 20000, "zell_v": 3.7, "wh": 74.0,
+                                                   "trigger": [[5.0, True, 3.0], [9.0, True, 2.22],
+                                                               [12.0, True, 1.5], [15.0, False, 0.0],
+                                                               [20.0, False, 0.0]]}),
     ("Anker 325 PowerCore 20K (A1268), USB-A", 5.0, 2.4, {"mah": 20000, "zell_v": 3.7, "wh": 0.0}),
     ("Powerbank 5 W", 5.0, 1.0),
     ("Powerbank 10 W", 5.0, 2.0),
@@ -1088,6 +1091,7 @@ class TriggerErgebnis:
 def trigger_einstellung(basis: NetzteilEinstellung, volt: float, ampere: float) -> NetzteilEinstellung:
     e = NetzteilEinstellung(**{**basis.__dict__, "name": f"{basis.name} – {volt:g} V",
                                "nenn_v": volt, "nenn_a": ampere, "nenn_w": 0.0, "trigger": [],
+                               "kapazitaet": False,      # Powerbank: der Kapazitätstest kommt zum Schluss
                                # über 5 V gelten die Grenzen der USB-PD-Spezifikation: ±5 %
                                **({"pd": True, "toleranz_proz": 5.0} if volt > 5.5 else {})})
     return ermitteln(e, usb=True) if ampere <= 0 else e
@@ -1120,6 +1124,8 @@ class TriggerAblauf:
         self.ergebnis = TriggerErgebnis()
         self.punkte: list[tuple] = []
         self.start_wann = time.time()
+        # Powerbank: nach allen Spannungen zum Schluss bei 5 V bis leer entladen
+        self.kap = bool(basis.powerbank and basis.kapazitaet)
         self.zustand = "umschalten"
         self.steuerbar = bool(geraet and geraet.kann_steuern)
         self.i = -1
@@ -1136,10 +1142,27 @@ class TriggerAblauf:
 
     @property
     def ziel(self) -> tuple[float, float] | None:
-        return self.stufen[self.i] if 0 <= self.i < len(self.stufen) else None
+        if 0 <= self.i < len(self.stufen):
+            return self.stufen[self.i]
+        if self.im_kap:
+            return 5.0, self.basis.kap_a
+        return None
+
+    @property
+    def im_kap(self) -> bool:
+        return self.kap and self.i == len(self.stufen)
 
     def einstellung_fuer(self, volt: float, ampere: float) -> NetzteilEinstellung:
         return trigger_einstellung(self.basis, volt, ampere)
+
+    def kap_einstellung(self) -> NetzteilEinstellung:
+        """Der Kapazitätstest zum Schluss: 5 V, nur entladen."""
+        b = self.basis
+        fuenf = next((a for v, a in self.stufen if v == 5.0 and a > 0), b.kap_a)
+        return NetzteilEinstellung(**{**b.__dict__, "name": f"{b.name} – Kapazität", "nenn_v": 5.0,
+                                      "nenn_a": fuenf, "nenn_w": 0.0, "trigger": [], "unbekannt": False,
+                                      "stufentest": False, "dauertest": False, "abschalttest": False,
+                                      "pd": False, "toleranz_proz": 5.0, "kapazitaet": True})
 
     def _weiter(self) -> None:
         self.i += 1
@@ -1152,11 +1175,19 @@ class TriggerAblauf:
         self._treffer = 0
         self._ueberspringen = False
         try:
-            self.geraet.last(False)
+            if self.basis.powerbank:
+                # nicht ohne Last stehen lassen - sonst schläft die Powerbank ein. Abschaltgrenze
+                # tief, damit der Wechsel auf eine kleinere Spannung die Last nicht abwirft
+                self.geraet.abschaltung_setzen(2.0)
+                self.geraet.strom_setzen(self.basis.mindest_a)
+                self.geraet.last(True)
+            else:
+                self.geraet.last(False)
         except Exception:
-            log.exception("Last aus")
+            log.exception("Last beim Umschalten")
         v = self.ziel[0]
-        self.bei_ereignis("umschalten", f"Am Trigger-Adapter jetzt {v:g} V einstellen – "
+        zusatz = " (zum Schluss: Kapazitätstest bis leer)" if self.im_kap else ""
+        self.bei_ereignis("umschalten", f"Am Trigger-Adapter jetzt {v:g} V einstellen{zusatz} – "
                                         f"die Prüfung beginnt, sobald {v:g} V anliegen.")
 
     def ueberspringen(self) -> None:
@@ -1187,7 +1218,10 @@ class TriggerAblauf:
         v, a = self.ziel
         if self._warten_seit is None:
             self._warten_seit = m.zeit
-        if m.an or m.strom > STROM_AUS:
+        if self.basis.powerbank:
+            if not m.an and m.spannung > 1:
+                self.geraet.last(True)          # Powerbank wach halten
+        elif m.an or m.strom > STROM_AUS:
             self.geraet.last(False)
             return
         if abs(m.spannung - v) <= v * TRIGGER_TREFFER:
@@ -1196,10 +1230,23 @@ class TriggerAblauf:
             self._treffer = 0
         if self._treffer >= 3:
             self.zustand = "laeuft"
+            if self.im_kap:
+                e = self.kap_einstellung()
+                self.teil = NetzteilAblauf(e, self.geraet, bei_ereignis=self._teil_ereignis)
+                # Kapazität ab voll: was die Spannungsstufen schon entnommen haben, zählt mit
+                vorher = sum(t["ergebnis"].get("energie_wh") or 0 for t in self.ergebnis.teile)
+                self.teil.ergebnis.energie_wh = round(vorher, 4)
+                if vorher:
+                    self.teil.ergebnis.hinweise.append(f"Darin enthalten: {_k(vorher, 2)} Wh aus den Prüfungen der "
+                                                       "einzelnen Spannungen davor.")
+                self.bei_ereignis("info", "5 V liegen an – Kapazitätstest läuft")
+                return
             e = self.einstellung_fuer(v, a)
             self.teil = NetzteilAblauf(e, self.geraet, bei_ereignis=self._teil_ereignis)
             self.bei_ereignis("info", f"{v:g} V liegen an – Prüfung läuft")
             return
+        if self.im_kap and m.zeit - self._warten_seit >= TRIGGER_WARTEN_S and not self._ueberspringen:
+            return                               # auf 5 V kommt es sicher - weiter warten
         if self._ueberspringen or m.zeit - self._warten_seit >= TRIGGER_WARTEN_S:
             grund = "übersprungen" if self._ueberspringen else "kam nicht"
             self.ergebnis.nicht.append({"volt": v, "gemessen": round(m.spannung, 2), "grund": grund})
@@ -1240,7 +1287,8 @@ class TriggerAblauf:
     def _fertig(self, grund: str = "", zustand: str = "fertig") -> None:
         r = self.ergebnis
         # Nur Spannungen mit Stromangabe haben etwas zu halten
-        urteile = [t["ergebnis"]["haelt"] for t in r.teile if not t["einstellung"].get("unbekannt")]
+        urteile = [t["ergebnis"]["haelt"] for t in r.teile
+                   if not t["einstellung"].get("unbekannt") and not t["einstellung"].get("kapazitaet")]
         angegeben = [a for _, a in self.stufen if a > 0]
         if any(u is False for u in urteile):
             r.haelt = False
@@ -1249,7 +1297,8 @@ class TriggerAblauf:
         elif urteile and all(u is True for u in urteile) and len(urteile) == len(angegeben) and not r.nicht:
             r.haelt = True
         if not grund:
-            da = [f"{t['einstellung']['nenn_v']:g} V" for t in r.teile]
+            da = ["Kapazität" if t["einstellung"].get("kapazitaet") else f"{t['einstellung']['nenn_v']:g} V"
+                  for t in r.teile]
             grund = "Geprüft: " + (", ".join(da) if da else "keine Spannung")
             if r.nicht:
                 grund += "; nicht unterstützt: " + ", ".join(f"{n['volt']:g} V" for n in r.nicht)

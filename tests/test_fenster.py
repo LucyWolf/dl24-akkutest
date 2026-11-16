@@ -467,7 +467,7 @@ def test_powerbank_im_fenster():
     f.reiter.setCurrentIndex(3)
     assert f.reiter.tabText(3) == "Powerbanks"
     pb = f.pb
-    assert not pb.schnell.isVisible() and not pb.unbekannt.isVisible() and pb.mah.isVisible()
+    assert pb.schnell.isVisible() and not pb.schnell_box.isVisible() and not pb.unbekannt.isVisible() and pb.mah.isVisible()
     assert not pb.knopf_start.isEnabled() and not pb.tests_gruppe.isEnabled()
     f.anschluss.setCurrentIndex(f.anschluss.findText("Simulator – Powerbank", flags=fenster.Qt.MatchStartsWith))
     f.verbinden_umschalten()
@@ -477,6 +477,15 @@ def test_powerbank_im_fenster():
     pb._vorlage()
     assert pb.nenn_a.value() == 3.0 and pb.mah.value() == 20000 and pb.wh.value() == 74
     assert pb.einstellung().name.startswith("INIU") and pb.einstellung().aufdruck_wh == 74
+    assert [(v, h.isChecked(), a.value()) for v, h, a in pb.trigger][:3] == [(5.0, True, 3.0), (9.0, True, 2.22),
+                                                                            (12.0, True, 1.5)]
+    pb.schnell.setChecked(True)
+    pb.mit_kap.setChecked(True)
+    plan = pb._plan()
+    assert [(e.nenn_v, e.kapazitaet) for e in plan] == [(5, False), (9, False), (12, False), (5, True)], plan
+    assert "Umschalten" in pb.dauer.text() and pb.schnell.isVisible() and pb.schnell_box.isVisible()
+    pb.mit_kap.setChecked(False)
+    pb.schnell.setChecked(False)
     pb.vorlage.setCurrentIndex(pb.vorlage.findText("Anker 325", flags=fenster.Qt.MatchStartsWith))
     pb._vorlage()
     assert pb.nenn_a.value() == 2.4 and pb.mah.value() == 20000 and pb.wh.value() == 0

@@ -20,9 +20,12 @@ class PowerbankReiter(NetzteilReiter):
         super()._bauen()
         f = self._typ_form
         self.name.setPlaceholderText("z. B. Anker PowerCore 10000, Xiaomi 20000")
-        # Was eine Powerbank nicht hat: Schnellladen über den Adapter (kommt später), "unbekannt", Toleranz
-        for w in (self.schnell, self.schnell_box, self.unbekannt, self.toleranz):
+        # "unbekannt" und eine eigene Toleranz gibt es hier nicht - USB/PD geben die Grenzen vor
+        for w in (self.unbekannt, self.toleranz):
             f.setRowVisible(w, False)
+        self.schnell.setText("Schnellladen (USB-PD / QC): weitere Spannungen über den Trigger-Adapter")
+        self.schnell.setToolTip("Erst werden alle gewählten Spannungen geprüft, zum Schluss läuft bei 5 V der "
+                                "Kapazitätstest")
         zeile = f.getWidgetPosition(self.nenn_w)[0] + 1
         self.mah = self._zahlfeld(0, 100000, 0, 500, " mAh", "nicht angegeben")
         self.mah.setToolTip("Kapazität laut Aufdruck, z. B. 10000 mAh. Gemeint ist meist der Akku innen "
@@ -97,7 +100,10 @@ class PowerbankReiter(NetzteilReiter):
         super()._vorlage(_)
         d = self.vorlage.currentData()
         if isinstance(d, tuple) and len(d) > 3 and hasattr(self, "mah"):
-            d = d[3]                          # bekanntes Modell: Kapazität gleich mit
+            d = d[3]                          # bekanntes Modell: Kapazität und Spannungen gleich mit
+            for (v, haken, a), (_, an, strom) in zip(self.trigger, d.get("trigger", [])):
+                haken.setChecked(an)
+                a.setValue(strom)
         if isinstance(d, dict) and hasattr(self, "mah"):
             self.mah.setValue(d.get("mah", 0))
             self.zell_v.setValue(d.get("zell_v", 3.7))
@@ -117,6 +123,8 @@ class PowerbankReiter(NetzteilReiter):
                                    nenn_mah_aus=self.nenn_mah_aus.value())
 
     def bereit(self) -> bool:
+        if self.schnell.isChecked():
+            return bool(self._trigger_stufen())
         return self.nenn_v.value() > 0 and self.nenn_a.value() > 0
 
     def _angabe_zeigen(self) -> None:
@@ -146,4 +154,14 @@ class PowerbankReiter(NetzteilReiter):
         super()._dauer_zeigen()
 
     def _plan(self) -> list[nt.NetzteilEinstellung]:
-        return [self.einstellung()] if self.bereit() else []
+        if not self.bereit():
+            return []
+        e = self.einstellung()
+        if not self.schnell.isChecked():
+            return [e]
+        teile = [nt.trigger_einstellung(e, v, a) for v, a in self._trigger_stufen()]
+        if e.kapazitaet:
+            fuenf = next((a for v, a in self._trigger_stufen() if v == 5.0 and a > 0), e.kap_a)
+            teile.append(dataclasses.replace(e, nenn_v=5.0, nenn_a=fuenf, nenn_w=0.0, stufentest=False,
+                                             dauertest=False, abschalttest=False, kapazitaet=True))
+        return teile

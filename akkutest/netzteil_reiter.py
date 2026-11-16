@@ -71,18 +71,21 @@ def kurz_html(e: dict, r: dict) -> str:
     if "teile" in r:
         teile, nicht = r.get("teile") or [], r.get("nicht") or []
         hoch = [t for t in teile if t["einstellung"]["nenn_v"] > 5.5]
+        geraet = "Die Powerbank" if e.get("powerbank") else "Das Ladegerät"
         if not hoch and any(n["volt"] > 5.5 for n in nicht):
-            zeilen.append("<p>Das Ladegerät kann <b>kein Schnellladen</b>: Es kamen immer nur 5 Volt.</p>")
+            zeilen.append(f"<p>{geraet} kann <b>kein Schnellladen</b>: Es kamen immer nur 5 Volt.</p>")
         elif teile:
-            zeilen.append("<p>Das Ladegerät kann diese Spannungen liefern: <b>"
-                          + ", ".join(f"{_kurz(t['einstellung']['nenn_v'])} V" for t in teile) + "</b>"
+            zeilen.append(f"<p>{geraet} kann diese Spannungen liefern: <b>"
+                          + ", ".join(f"{_kurz(t['einstellung']['nenn_v'])} V" for t in teile
+                                      if not t["einstellung"].get("kapazitaet")) + "</b>"
                           + (". Nicht dabei: " + ", ".join(f"{_kurz(n['volt'])} V" for n in nicht) if nicht else "")
                           + ".</p>")
         for t in teile:
             te, tr = t["einstellung"], t["ergebnis"]
             wort = URTEILE.get(tr.get("urteil"), ("", ""))[0]
             text = " ".join(tr.get("laien") or [])
-            zeilen.append(f"<p><b>Bei {_kurz(te['nenn_v'])} Volt:</b> {html.escape(wort)}. {html.escape(text)}</p>")
+            titel = "Kapazität (bis leer bei 5 Volt)" if te.get("kapazitaet") else f"Bei {_kurz(te['nenn_v'])} Volt"
+            zeilen.append(f"<p><b>{titel}:</b> {html.escape(wort)}. {html.escape(text)}</p>")
     else:
         for satz in r.get("laien") or []:
             zeilen.append(f"<p>{html.escape(satz)}</p>")
@@ -334,7 +337,8 @@ def trigger_html(e: dict, r: dict, fach: bool = False) -> str:
         zeilen.append("<b style='color:#d03b3b'>Kein Schnellladen: über den Adapter kamen nur "
                       f"{zahl(hoch_fehlt[0]['gemessen'], 2)} V.</b>")
     elif teile:
-        zeilen.append("Unterstützt: " + ", ".join(f"{_kurz(t['einstellung']['nenn_v'])} V" for t in teile)
+        zeilen.append("Unterstützt: " + ", ".join(f"{_kurz(t['einstellung']['nenn_v'])} V" for t in teile
+                                                  if not t["einstellung"].get("kapazitaet"))
                       + ("  ·  nicht: " + ", ".join(f"{_kurz(n['volt'])} V ({n['grund']})" for n in nicht)
                          if nicht else ""))
     kopf = "".join(f"<td style='color:gray'>{k}</td>" for k in ("Spannung", "Angabe", "Ergebnis", "liefert bis",
@@ -343,6 +347,13 @@ def trigger_html(e: dict, r: dict, fach: bool = False) -> str:
     for t in teile:
         te, tr = t["einstellung"], t["ergebnis"]
         best = nt.bestleistung(tr)
+        if te.get("kapazitaet"):
+            z = tr.get("zustand_proz")
+            text = (f"Zustand {zahl(z, 0)} %" if z is not None else "nicht bis leer")
+            farbe = AMPEL[nt.kap_ampel(z)] if z is not None else "gray"
+            reihen += (f"<tr><td><b>Kapazität</b></td><td>bei 5 V</td><td style='color:{farbe}'>{text}</td>"
+                       f"<td colspan=2>{zahl(tr.get('energie_wh', 0), 1)} Wh abgegeben</td></tr>")
+            continue
         if te.get("unbekannt"):
             urteil, farbe, angabe = "ermittelt", "gray", "unbekannt"
         else:
@@ -1032,7 +1043,7 @@ class NetzteilReiter(QWidget):
             self.dauer.setText("<span style='color:#d03b3b'>Bitte mindestens eine Spannung wählen.</span>")
             return
         if len(plan) > 1 or self.schnell.isChecked():
-            s = sum(x.dauer_s for e in plan for x in nt.plan(e))
+            s = sum(nt.geplant_s(e) for e in plan)
             fehler = next((f for f in (e.pruefen() for e in plan) if f), None)
             text = f"Dauer etwa {dauer_text(s + 30 * len(plan))} plus Umschalten am Adapter"
             self.dauer.setText(f"<span style='color:#d03b3b'>{fehler}</span>" if fehler else text)
@@ -1396,11 +1407,15 @@ class NetzteilReiter(QWidget):
                 gesamt = "gesamt noch"
                 if isinstance(ab, nt.TriggerAblauf):
                     # die weiteren Spannungen kommen danach - sonst sieht es aus, als käme nur diese
-                    weiter = [v for v, _ in ab.stufen[ab.i + 1:]]
-                    rest = (rest[0], rest[1] + sum(sum(x.dauer_s for x in nt.plan(ab.einstellung_fuer(v, a)))
+                    weiter = [f"{_kurz(v)} V" for v, _ in ab.stufen[ab.i + 1:]]
+                    rest = (rest[0], rest[1] + sum(nt.geplant_s(ab.einstellung_fuer(v, a))
                                                    for v, a in ab.stufen[ab.i + 1:]))
-                    gesamt = (f"Spannung {ab.i + 1} von {len(ab.stufen)}"
-                              + (", danach " + ", ".join(f"{_kurz(v)} V" for v in weiter) if weiter else "")
+                    if ab.kap and not ab.im_kap:
+                        weiter.append("Kapazitätstest")
+                        rest = (rest[0], rest[1] + nt.kap_schaetzung_s(ab.kap_einstellung()))
+                    gesamt = ("Kapazitätstest zum Schluss · noch etwa" if ab.im_kap else
+                              f"Spannung {ab.i + 1} von {len(ab.stufen)}"
+                              + (", danach " + ", ".join(weiter) if weiter else "")
                               + " · alle zusammen noch etwa")
                 self.schritt.setText(f"{vorn} · noch {dauer_text(rest[0])[2:]} · {gesamt} "
                                      f"{dauer_text(rest[1])}")
@@ -1476,11 +1491,15 @@ class NetzteilReiter(QWidget):
             angabe = f"{_kurz(d['nenn_v'])} V / {_kurz(round(strom, 2))} A"
             grenze = "–"
             if "teile" in r:
-                volt = [t["einstellung"]["nenn_v"] for t in r["teile"]]
+                volt = [t["einstellung"]["nenn_v"] for t in r["teile"] if not t["einstellung"].get("kapazitaet")]
                 angabe = "PD/QC " + "/".join(_kurz(v) for v in volt) + " V" if volt else "PD/QC –"
                 best = [nt.bestleistung(t["ergebnis"]) for t in r["teile"]]
                 best = [b[0] for b in best if b]
                 grenze = f"bis {zahl(max(best), 1)} W" if best else "–"
+                kap = next((t["ergebnis"] for t in r["teile"] if t["einstellung"].get("kapazitaet")), None)
+                if kap and kap.get("energie_wh"):
+                    grenze = f"{zahl(kap['energie_wh'], 1)} Wh" + (f" · Zustand {zahl(kap['zustand_proz'], 0)} %"
+                                                                  if kap.get("zustand_proz") is not None else "")
             elif ee.get("unbekannt"):
                 angabe = f"{_kurz(d['nenn_v'])} V / unbekannt"
                 b = nt.bestleistung(r)
