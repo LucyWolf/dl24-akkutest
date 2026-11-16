@@ -261,6 +261,7 @@ def test_netzteil_reiter():
     from PySide6.QtWidgets import QTextBrowser
     text = f.nt._fenster.findChild(QTextBrowser).toPlainText()
     assert f.nt._fenster.isVisible() and "Kurz gesagt" in text and "Messwerte für Fachleute" in text
+    assert "Messaufbau" in text and "Kabel / Adapter" in text and "nicht bekannt" in text, text
     foto(f.nt._fenster, "12-ergebnisfenster")
     f.nt._fenster.close()
     # Bericht als PDF
@@ -305,6 +306,12 @@ def test_netzteil_reiter():
     assert warten(lambda: not f.nt.laeuft, 60)
     app.processEvents()
     assert 100 <= f.nt.kabel.value() <= 150, f.nt.kabel.value()
+    f.nt.kabel_name.setText("Testkabel 1 m")
+    e = f.nt.einstellung()
+    assert e.kabel_name == "Testkabel 1 m" and e.kabel_wann > 0
+    from akkutest.netzteil_reiter import messaufbau_html
+    t = messaufbau_html(e.__dict__, {})
+    assert "Testkabel 1 m" in t and "gemessen am" in t and "herausgerechnet" in t, t
     assert len(sp.netzteil_tests()) == 1 and "eingetragen" in f.nt.schritt.text()
     f.nt.kabel.setValue(0)
     f.trennen()
@@ -382,6 +389,18 @@ def test_schnellladen_im_fenster():
     f.nt.stufen.setValue(2)
     f.nt.stufe_s.setValue(10)
     assert "Umschalten" in f.nt.dauer.text(), f.nt.dauer.text()
+    # als eigene Vorlage speichern und wieder laden
+    f.nt.vorlage_speichern()
+    assert sp.vorlagen()[0][0] == "Schnelllader" and f.nt.vorlage.currentText() == "★ Schnelllader"
+    f.nt.schnell.setChecked(False)
+    f.nt.vorlage.setCurrentIndex(f.nt.vorlage.findText("USB-Hub 10 W", flags=fenster.Qt.MatchStartsWith))
+    f.nt._vorlage()
+    assert not f.nt.schnell.isChecked() and f.nt.nenn_a.value() == 2.0
+    f.nt.vorlage.setCurrentIndex(f.nt.vorlage.findText("★ Schnelllader"))
+    f.nt._vorlage()
+    assert f.nt.schnell.isChecked() and f.nt.knopf_vorlage_weg.isEnabled()
+    assert [(v, h.isChecked(), a.value()) for v, h, a in f.nt.trigger][:3] == [(5.0, True, 2.0), (9.0, True, 0),
+                                                                                (12.0, False, 0)]
     f.nt.starten()
     assert warten(lambda: "jetzt 5 V" in f.nt.schritt.text() and f.nt.knopf_weiter.isVisible(), 5), f.nt.schritt.text()
     assert warten(lambda: "Spannung 1 von 3, danach 9 V, 15 V" in f.nt.schritt.text(), 30), f.nt.schritt.text()

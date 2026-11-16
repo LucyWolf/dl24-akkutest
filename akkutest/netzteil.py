@@ -74,6 +74,8 @@ class NetzteilEinstellung:
     unbekannt: bool = False   # Strom unbekannt: Leistung ermitteln statt Angabe prüfen
     bis_ende: bool = False    # Abschalttest bis zum Abschalten (höchstens 5 A bei USB / 150 W)
     kabel_mohm: float = 0.0   # Kabel + Adapter: wird herausgerechnet (Spannung an der Buchse)
+    kabel_name: str = ""      # welches Kabel / welcher Adapter - steht im Bericht
+    kabel_wann: float = 0.0   # wann der Kabelwert gemessen wurde (0 = von Hand eingetragen)
     fuehler: bool = True      # Temperaturfühler des DL24 auswerten (aus: Temperatur ignorieren)
     hub: bool = False         # USB-Hub: geprüft wird nur ein Port
 

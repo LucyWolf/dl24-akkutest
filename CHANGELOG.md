@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.29 – 16.11.2026
+
+- **Eigene Vorlagen:** „Speichern“ neben der Vorlagenliste legt das ganze
+  Typenschild unter dem Gerätenamen ab – auch Schnellladegeräte mit ihren
+  Spannungen und Strömen. Eigene Vorlagen stehen mit ★ oben in der Liste,
+  „Löschen“ entfernt sie wieder.
+- **Kabel im Bericht:** neues Feld „Kabel (Bezeichnung)“. Der Bericht hat einen
+  Abschnitt „Messaufbau“: Messgerät, welches Kabel/welcher Adapter, Widerstand
+  und wann er gemessen wurde – oder dass er nicht bekannt ist.
+- Kabelwert und Bezeichnung bleiben zwischen zwei Programmstarts eingetragen.
+
 ## 1.0.28 – 16.11.2026
 
 - **Schnellladen:** Die Anzeige sagt, welche Spannung gerade dran ist und

@@ -56,6 +56,11 @@ CREATE TABLE IF NOT EXISTS tests (
     grund TEXT NOT NULL DEFAULT '',
     kurve TEXT NOT NULL DEFAULT '[]'
 );
+CREATE TABLE IF NOT EXISTS netzteil_vorlagen (
+    name TEXT PRIMARY KEY,
+    daten TEXT NOT NULL DEFAULT '{}',
+    angelegt REAL NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS netzteil_tests (
     id INTEGER PRIMARY KEY,
     wann REAL NOT NULL,
@@ -171,6 +176,20 @@ class Speicher:
             d["kurve"] = json.loads(d["kurve"])
             aus.append(d)
         return aus
+
+    def vorlagen(self) -> list[tuple[str, dict]]:
+        """Eigene Netzteil-Vorlagen: (Name, Typenschild-Angaben)."""
+        return [(r["name"], json.loads(r["daten"])) for r in
+                self.db.execute("SELECT * FROM netzteil_vorlagen ORDER BY name COLLATE NOCASE")]
+
+    def vorlage_speichern(self, name: str, daten: dict) -> None:
+        self.db.execute("INSERT INTO netzteil_vorlagen (name, daten, angelegt) VALUES (?,?,?) "
+                        "ON CONFLICT(name) DO UPDATE SET daten=excluded.daten", (name, json.dumps(daten), time.time()))
+        self.db.commit()
+
+    def vorlage_loeschen(self, name: str) -> None:
+        self.db.execute("DELETE FROM netzteil_vorlagen WHERE name=?", (name,))
+        self.db.commit()
 
     def netzteil_loeschen(self, test_id: int) -> None:
         self.db.execute("DELETE FROM netzteil_tests WHERE id=?", (test_id,))

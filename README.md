@@ -109,6 +109,8 @@ verbunden (oder ein PX100).
 | Dauertest | Ein fester Strom über längere Zeit, mit Temperatur. Zeigt, ob das Gerät warm wird und dann nachgibt. |
 | Abschalttest | Über die Angabe hinaus in 5-%-Schritten, bis das Gerät abschaltet oder die Spannung einbricht – höchstens bis zur eingestellten Grenze. |
 
+   Eigene Geräte lassen sich mit **„Speichern“** neben der Vorlagenliste als
+   Vorlage ablegen (★) – beim nächsten Mal einfach auswählen.
 5. **Prüfen.** Am Ende steht ein klares Urteil, dazu Kennlinie,
    Abschaltgrenze, größte Leistung und höchste Temperatur. Jede Prüfung wird
    gespeichert, mit **Bericht speichern (PDF)** lässt sie sich weitergeben.

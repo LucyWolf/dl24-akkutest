@@ -4,6 +4,7 @@ from __future__ import annotations
 import html
 import logging
 import threading
+import time
 from datetime import datetime
 
 from PySide6.QtCore import Qt
@@ -86,6 +87,28 @@ def kurz_html(e: dict, r: dict) -> str:
         for satz in r.get("laien") or []:
             zeilen.append(f"<p>{html.escape(satz)}</p>")
     return "".join(zeilen)
+
+
+def messaufbau_html(e: dict, r: dict) -> str:
+    """Womit gemessen wurde - vor allem das Kabel, denn das verfälscht sonst die Spannung."""
+    name = html.escape(e.get("kabel_name") or "") or "nicht angegeben"
+    zeilen = [("Messgerät", "elektronische Last Atorch DL24P (Messung an ihren Klemmen, Auflösung 1 mV)"),
+              ("Kabel / Adapter", name)]
+    k = e.get("kabel_mohm", 0)
+    if k and not r.get("kabel_unplausibel"):
+        wann = e.get("kabel_wann")
+        woher = (f"gemessen am {datetime.fromtimestamp(wann):%d.%m.%Y um %H:%M} Uhr an einem guten Ladegerät"
+                 if wann else "von Hand eingetragen")
+        zeilen.append(("Widerstand Kabel + Adapter", f"{k:.0f} mΩ ({woher}) – herausgerechnet: Die Bewertung gilt "
+                                                     "für die Spannung an der Buchse des Geräts"))
+    elif k:
+        zeilen.append(("Widerstand Kabel + Adapter", f"{k:.0f} mΩ eingetragen, aber unplausibel (größer als der "
+                                                     "gesamte gemessene Widerstand) – nicht herausgerechnet"))
+    else:
+        zeilen.append(("Widerstand Kabel + Adapter", "nicht bekannt – die Spannung wurde am Ende des Kabels "
+                                                     "gemessen, Verluste im Kabel sind darin enthalten"))
+    return "<table cellspacing=4>" + "".join(
+        f"<tr><td style='color:gray'>{a}</td><td>{b}</td></tr>" for a, b in zeilen) + "</table>"
 
 
 def geprueft_text(e: dict, r: dict) -> str:
@@ -283,6 +306,7 @@ class NetzteilReiter(QWidget):
         self._teil_gezeigt = None
         self._nenn_v: float | None = None
         self._bauen()
+        self.vorlagen_laden()
         self._vorlage(0)
         self.verlauf_laden()
 
@@ -294,11 +318,19 @@ class NetzteilReiter(QWidget):
         g = QGroupBox("Typenschild")
         f = QFormLayout(g)
         self.vorlage = QComboBox()
-        self.vorlage.addItem("– wählen oder unten selbst eintragen –", None)
-        for name, v, a in nt.VORLAGEN:
-            self.vorlage.addItem(nt.vorlage_text(name, v, a), (v, a, name))
         self.vorlage.activated.connect(self._vorlage)
-        f.addRow("Vorlage:", self.vorlage)
+        zeile = QHBoxLayout()
+        zeile.addWidget(self.vorlage, 1)
+        self.knopf_vorlage_neu = QPushButton("Speichern")
+        self.knopf_vorlage_neu.setToolTip("Die Angaben vom Typenschild unter dem Gerätenamen als eigene Vorlage "
+                                          "speichern")
+        self.knopf_vorlage_neu.clicked.connect(self.vorlage_speichern)
+        self.knopf_vorlage_weg = QPushButton("Löschen")
+        self.knopf_vorlage_weg.setToolTip("Die gewählte eigene Vorlage (★) löschen")
+        self.knopf_vorlage_weg.clicked.connect(self.vorlage_loeschen)
+        zeile.addWidget(self.knopf_vorlage_neu)
+        zeile.addWidget(self.knopf_vorlage_weg)
+        f.addRow("Vorlage:", zeile)
         self.name = QLineEdit()
         self.name.setPlaceholderText("z. B. Anker 20W, Hub Port 3, Netzteil Lötstation")
         f.addRow("Gerät:", self.name)
@@ -329,6 +361,17 @@ class NetzteilReiter(QWidget):
         self.knopf_kabel_messen.clicked.connect(self.kabel_messen)
         zeile.addWidget(self.knopf_kabel_messen)
         f.addRow("Kabel + Adapter:", zeile)
+        self.kabel_name = QLineEdit()
+        self.kabel_name.setPlaceholderText("welches Kabel / welcher Adapter, z. B. Anker USB-C 1 m + Trigger-Adapter")
+        f.addRow("Kabel (Bezeichnung):", self.kabel_name)
+        # Kabel bleibt zwischen zwei Programmstarts eingetragen
+        from PySide6.QtCore import QSettings
+        self._einst = QSettings("dl24-akkutest", "dl24-akkutest")
+        self._kabel_wann = float(self._einst.value("kabel/wann", 0) or 0)
+        self.kabel_name.setText(str(self._einst.value("kabel/name", "") or ""))
+        self.kabel.setValue(float(self._einst.value("kabel/mohm", 0) or 0))
+        self.kabel.valueChanged.connect(self._kabel_merken)
+        self.kabel_name.textChanged.connect(self._kabel_merken)
         self.schnell = QCheckBox("Schnellladegerät (USB-PD / QC / Fast Charging)")
         self.schnell.setToolTip("9 V, 12 V, 15 V, 20 V gibt das Ladegerät nur über einen Trigger-Adapter heraus")
         self.schnell.toggled.connect(self._schnell_umschalten)
@@ -650,9 +693,76 @@ class NetzteilReiter(QWidget):
             feld.blockSignals(False)
         self._angabe_zeigen()
 
+    def vorlagen_laden(self, auswaehlen: str | None = None) -> None:
+        self.vorlage.blockSignals(True)
+        self.vorlage.clear()
+        self.vorlage.addItem("– wählen oder unten selbst eintragen –", None)
+        for name, daten in self.f.speicher.vorlagen():
+            self.vorlage.addItem(f"★ {name}", {"eigen": name, **daten})
+        for name, v, a in nt.VORLAGEN:
+            self.vorlage.addItem(nt.vorlage_text(name, v, a), (v, a, name))
+        if auswaehlen:
+            i = self.vorlage.findText(f"★ {auswaehlen}")
+            self.vorlage.setCurrentIndex(max(0, i))
+        self.vorlage.blockSignals(False)
+        self._vorlage_knoepfe()
+
+    def _vorlage_knoepfe(self) -> None:
+        d = self.vorlage.currentData()
+        self.knopf_vorlage_weg.setEnabled(isinstance(d, dict) and not self.laeuft)
+
+    def _typenschild(self) -> dict:
+        """Alles aus dem Typenschild, was eine eigene Vorlage braucht."""
+        return {"nenn_v": self.nenn_v.value(), "nenn_a": self.nenn_a.value(), "nenn_w": self.nenn_w.value(),
+                "toleranz": self.toleranz.value(), "unbekannt": self.unbekannt.isChecked(),
+                "schnell": self.schnell.isChecked(),
+                "trigger": [[v, haken.isChecked(), a.value()] for v, haken, a in self.trigger]}
+
+    def vorlage_speichern(self) -> None:
+        name = self.name.text().strip()
+        if not name:
+            QMessageBox.information(self, "Vorlage speichern", "Bitte zuerst bei „Gerät“ einen Namen eintragen – "
+                                                               "unter diesem Namen wird die Vorlage gespeichert.")
+            return
+        if not self.bereit():
+            QMessageBox.information(self, "Vorlage speichern", "Bitte zuerst die Angaben vom Typenschild "
+                                                               "eintragen.")
+            return
+        if name in {n for n, _ in self.f.speicher.vorlagen()} and not self.f._frage(
+                "Vorlage speichern", f"Es gibt schon eine Vorlage „{name}“. Überschreiben?"):
+            return
+        self.f.speicher.vorlage_speichern(name, self._typenschild())
+        self.vorlagen_laden(auswaehlen=name)
+        self.f.b.ereignis.emit("info", f"Vorlage „{name}“ gespeichert")
+
+    def vorlage_loeschen(self) -> None:
+        d = self.vorlage.currentData()
+        if not isinstance(d, dict):
+            return
+        if not self.f._frage("Vorlage löschen", f"Eigene Vorlage „{d['eigen']}“ löschen?"):
+            return
+        self.f.speicher.vorlage_loeschen(d["eigen"])
+        self.vorlagen_laden()
+
     def _vorlage(self, _=None) -> None:
         d = self.vorlage.currentData()
-        if d:
+        self._vorlage_knoepfe()
+        if isinstance(d, dict):
+            # eigene Vorlage: alles so eintragen, wie es gespeichert wurde
+            self.schnell.setChecked(d.get("schnell", False))
+            for (v, haken, a), (v2, an, strom) in zip(self.trigger, d.get("trigger", [])):
+                haken.setChecked(an)
+                a.setValue(strom)
+            self.unbekannt.setChecked(d.get("unbekannt", False))
+            for feld, wert in ((self.nenn_v, d.get("nenn_v", 0)), (self.nenn_a, d.get("nenn_a", 0)),
+                               (self.nenn_w, d.get("nenn_w", 0))):
+                feld.blockSignals(True)
+                feld.setValue(wert)
+                feld.blockSignals(False)
+            self.toleranz.setValue(d.get("toleranz", 5))
+            self.name.setText(d["eigen"])
+        elif d:
+            self.schnell.setChecked(False)
             v, a, name = d
             self.unbekannt.setChecked(False)
             self.nenn_v.setValue(v)
@@ -686,7 +796,11 @@ class NetzteilReiter(QWidget):
 
     def _felder_sperren(self) -> None:
         frei = not self.laeuft and not self.schnell.isChecked()
-        for w in (self.vorlage, self.nenn_v, self.unbekannt):
+        # Vorlagen gehen immer - auch eigene für Schnellladegeräte
+        for w in (self.vorlage, self.knopf_vorlage_neu):
+            w.setEnabled(not self.laeuft)
+        self._vorlage_knoepfe()
+        for w in (self.nenn_v, self.unbekannt):
             w.setEnabled(frei)
         for w in (self.nenn_a, self.nenn_w):
             w.setEnabled(frei and not self.unbekannt.isChecked())
@@ -706,7 +820,7 @@ class NetzteilReiter(QWidget):
     def _ist_hub(self) -> bool:
         d = self.vorlage.currentData()
         name = (self.name.text() or self.name.placeholderText()).lower()
-        return bool(d and d[2].startswith("USB-Hub")) or "hub" in name.split("z. b.")[0]
+        return bool(isinstance(d, tuple) and d[2].startswith("USB-Hub")) or "hub" in name.split("z. b.")[0]
 
     def einstellung(self) -> nt.NetzteilEinstellung:
         return nt.NetzteilEinstellung(
@@ -719,7 +833,8 @@ class NetzteilReiter(QWidget):
             dauer_min=self.dauer_min.value(), abschalttest=self.mit_abschalt.isChecked(),
             max_proz=self.max_proz.value(), temp_grenze=self.temp_grenze.value(),
             fuehler=self.mit_fuehler.isChecked(), hub=self._ist_hub(),
-            bis_ende=self.bis_ende.isChecked(), kabel_mohm=self.kabel.value())
+            bis_ende=self.bis_ende.isChecked(), kabel_mohm=self.kabel.value(),
+            kabel_name=self.kabel_name.text().strip(), kabel_wann=self._kabel_wann)
 
     def _unbekannt_umschalten(self, an: bool) -> None:
         if an:
@@ -833,6 +948,22 @@ class NetzteilReiter(QWidget):
     def trigger_felder(self) -> list:
         return [w for _, haken, a in self.trigger for w in (haken, a)]
 
+    def _kabel_setzen(self, mohm: float) -> None:
+        """Gemessener Kabelwert: mit Zeitpunkt merken (von Hand eingetragen hat keinen)."""
+        self._kabel_wann = time.time()
+        self.kabel.blockSignals(True)
+        self.kabel.setValue(mohm)
+        self.kabel.blockSignals(False)
+        self._kabel_merken()
+        self._angabe_zeigen()
+
+    def _kabel_merken(self, *_) -> None:
+        if self.sender() is self.kabel:
+            self._kabel_wann = 0.0              # von Hand geändert - nicht mehr "gemessen am"
+        self._einst.setValue("kabel/mohm", self.kabel.value())
+        self._einst.setValue("kabel/name", self.kabel_name.text())
+        self._einst.setValue("kabel/wann", self._kabel_wann)
+
     def kabel_messen(self) -> None:
         """Kabel + Adapter an einem guten Ladegerät messen: kurzer Stufentest, die
         Steigung der Kennlinie ist der Widerstand. Ein gutes Ladegerät hat selbst
@@ -873,7 +1004,7 @@ class NetzteilReiter(QWidget):
             QMessageBox.warning(self, "Kabel messen", "Die Messung hat nicht geklappt: " + (r.grund or "kein Wert") +
                                 "\n\nIst das Ladegerät eingesteckt und schafft es 2 A?")
             return
-        self.kabel.setValue(r.widerstand_mohm)
+        self._kabel_setzen(r.widerstand_mohm)
         self.schritt.setText(f"Kabel + Adapter: {r.widerstand_mohm:.0f} mΩ – eingetragen")
         log.info("Kabel gemessen: %.0f mΩ", r.widerstand_mohm)
         QMessageBox.information(self, "Kabel messen",
@@ -1201,7 +1332,7 @@ class NetzteilReiter(QWidget):
     def _kabel_uebernehmen(self) -> None:
         e, r = getattr(self, "_angezeigt", ({}, {}))
         if r.get("widerstand_mohm"):
-            self.kabel.setValue(r["widerstand_mohm"])
+            self._kabel_setzen(r["widerstand_mohm"])
             self.f.b.ereignis.emit("info", f"Kabelwert {r['widerstand_mohm']:.0f} mΩ übernommen – gilt ab der "
                                            "nächsten Prüfung")
 
@@ -1231,6 +1362,7 @@ class NetzteilReiter(QWidget):
             f"<p style='color:gray'>Angabe auf dem Gerät: {angabe} · geprüft am {wann:%d.%m.%Y um %H:%M} Uhr</p>"
             f"<h3>Kurz gesagt</h3>{kurz_html(e, r)}"
             f"<h3>Was wurde geprüft?</h3><p>{geprueft_text(e, r)}</p>"
+            f"<h3>Messaufbau</h3>{messaufbau_html(e, r)}"
             f"<p><img src='kurve.png' width='{breite}'></p>"
             "<p style='color:gray'>Oben: Spannung mit Farbbereichen – <span style='color:#2e9e4f'>grün</span> = "
             "in Ordnung, <span style='color:#c77700'>gelb</span> = außerhalb der Vorgabe, aber nutzbar, "
