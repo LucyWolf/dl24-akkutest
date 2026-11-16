@@ -479,7 +479,7 @@ def test_powerbank_im_fenster():
     assert pb.einstellung().name.startswith("INIU") and pb.einstellung().aufdruck_wh == 74
     assert [(v, h.isChecked(), a.value()) for v, h, a in pb.trigger][:3] == [(5.0, True, 3.0), (9.0, True, 2.22),
                                                                             (12.0, True, 1.5)]
-    pb.schnell.setChecked(True)
+    assert pb.schnell.isChecked()                       # die INIU kann PD - Haken kommt mit
     pb.mit_kap.setChecked(True)
     plan = pb._plan()
     assert [(e.nenn_v, e.kapazitaet) for e in plan] == [(5, False), (9, False), (12, False), (5, True)], plan
@@ -498,9 +498,8 @@ def test_powerbank_im_fenster():
     assert "2,2 Wh" in pb.angabe_hinweis.text(), pb.angabe_hinweis.text()
     pb.stufen.setValue(2)
     pb.stufe_s.setValue(10)
-    pb.mit_abschalt.setChecked(True)
     pb.mit_kap.setChecked(True)
-    assert not pb.mit_abschalt.isChecked() and not pb.mit_abschalt.isEnabled()   # danach ist sie leer
+    assert pb.mit_abschalt.isEnabled()                  # geht zusammen: erst Abschalttest, dann Kapazität
     e = pb.einstellung()
     assert e.powerbank and e.kapazitaet and e.mah == 600 and e.mindest_a == 0.3 and not e.hub
     assert "Kapazitätstest" in pb.dauer.text(), pb.dauer.text()

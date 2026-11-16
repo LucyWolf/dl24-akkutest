@@ -350,10 +350,6 @@ def plan(e: NetzteilEinstellung) -> list[Schritt]:
     if e.dauertest:
         s.append(Schritt("dauer", round(max(a * e.dauer_proz / 100, e.mindest_a if e.powerbank else 0), 3),
                          e.dauer_min * 60))
-    if e.powerbank and e.kapazitaet:
-        # bis leer - danach ist nichts mehr zu prüfen, ein Abschalttest entfällt
-        s.append(Schritt("kapazitaet", round(max(e.kap_a, e.mindest_a), 3), PB_KAP_MAX_S))
-        return s
     if e.abschalttest:
         bis = e.such_ende_a() / a if e.bis_ende else e.max_proz / 100
         k = 1.0 + ABSCHALT_SCHRITT
@@ -362,6 +358,9 @@ def plan(e: NetzteilEinstellung) -> list[Schritt]:
             k += ABSCHALT_SCHRITT
         if e.bis_ende and (not s or s[-1].soll_a < e.such_ende_a() - 1e-6):
             s.append(Schritt("abschalt", round(e.such_ende_a(), 3), ABSCHALT_STUFE_S))
+    if e.powerbank and e.kapazitaet:
+        # zum Schluss bis leer - schaltet sie vorher bei Überlast ab, geht es nach dem Knopfdruck weiter
+        s.append(Schritt("kapazitaet", round(max(e.kap_a, e.mindest_a), 3), PB_KAP_MAX_S))
     return s
 
 
@@ -775,7 +774,7 @@ class NetzteilAblauf:
 
     @property
     def laeuft(self) -> bool:
-        return self.zustand in ("leerlauf", "laeuft")
+        return self.zustand in ("leerlauf", "laeuft", "wieder_an")
 
     @property
     def schritt(self) -> Schritt | None:
@@ -816,6 +815,8 @@ class NetzteilAblauf:
         try:
             if self.zustand == "leerlauf":
                 self._leerlauf(m)
+            elif self.zustand == "wieder_an":
+                self._wieder_an(m)
             elif self.zustand == "laeuft":
                 self._laeuft(m)
         except Exception as ex:
@@ -871,6 +872,27 @@ class NetzteilAblauf:
         self.zustand = "laeuft"
         self.bei_ereignis("info", f"Powerbank liefert {_k(r.leerlauf_v, 3)} V bei {_k(e.mindest_a, 2)} A – "
                                   "Test beginnt")
+        self._naechster(m)
+
+    def _wieder_an(self, m: Messwert) -> None:
+        """Nach einer Überlast: warten, bis die Powerbank wieder Spannung liefert."""
+        e = self.einstellung
+        if m.spannung < e.nenn_v * ZUSAMMENBRUCH:
+            self._ll.clear()
+            if m.zeit - self._pb_seit > 600:
+                self._last_aus()
+                self._fertig("Nach der Überlast nicht wieder eingeschaltet - Kapazitätstest entfällt")
+            return
+        if not m.an:
+            self.geraet.last(True)
+            return
+        self._ll.append(m.spannung)
+        if len(self._ll) < 3:
+            return
+        self.geraet.abschaltung_setzen(round(e.nenn_v * ZUSAMMENBRUCH, 2))
+        self._letzt = m
+        self.zustand = "laeuft"
+        self.bei_ereignis("info", "Powerbank liefert wieder – Kapazitätstest beginnt")
         self._naechster(m)
 
     def _leerlauf(self, m: Messwert) -> None:
@@ -976,6 +998,24 @@ class NetzteilAblauf:
             r.kap_leer = True
             r.autoaus = im_schritt < PB_AUTOAUS_S
             self._fertig(f"Powerbank leer: nach {dauer_kurz(r.kap_s)} abgeschaltet")
+            return
+        kap_i = next((k for k, x in enumerate(self.schritte) if x.art == "kapazitaet"), None)
+        if (self._aus >= 2 or self._zu_wenig >= 3) and e.powerbank and kap_i is not None and self.i < kap_i:
+            # Überlast vor dem Kapazitätstest: festhalten, Powerbank wieder einschalten lassen, weiter
+            art = "abgeschaltet" if self._aus >= 2 else "eingebrochen"
+            r.abschalt_a, r.abschalt_art = s.soll_a, art
+            r.hinweise.append(f"Bei {_k(s.soll_a, 2)} A {art} – danach wieder eingeschaltet für den "
+                              "Kapazitätstest.")
+            self.i = kap_i - 1
+            self.zustand = "wieder_an"
+            self._pb_seit = m.zeit
+            self._ll.clear()
+            self.geraet.abschaltung_setzen(2.0)
+            self.geraet.strom_setzen(e.mindest_a)
+            self.geraet.last(True)
+            self.bei_ereignis("umschalten", f"Die Powerbank hat bei {_k(s.soll_a, 2)} A {art} (Überlast). "
+                                            "Bitte den Knopf an der Powerbank drücken – dann folgt der "
+                                            "Kapazitätstest.")
             return
         if self._aus >= 2 or self._zu_wenig >= 3:
             self._last_aus()
@@ -1187,7 +1227,11 @@ class TriggerAblauf:
             log.exception("Last beim Umschalten")
         v = self.ziel[0]
         zusatz = " (zum Schluss: Kapazitätstest bis leer)" if self.im_kap else ""
-        self.bei_ereignis("umschalten", f"Am Trigger-Adapter jetzt {v:g} V einstellen{zusatz} – "
+        knopf = ""
+        if self.basis.powerbank and self.ergebnis.teile and \
+                self.ergebnis.teile[-1]["ergebnis"].get("abschalt_a") is not None:
+            knopf = "Die Powerbank hat wegen Überlast abgeschaltet – Knopf drücken. "
+        self.bei_ereignis("umschalten", f"{knopf}Am Trigger-Adapter jetzt {v:g} V einstellen{zusatz} – "
                                         f"die Prüfung beginnt, sobald {v:g} V anliegen.")
 
     def ueberspringen(self) -> None:

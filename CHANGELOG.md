@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.40 – 17.11.2026
+
+- **Vorlage setzt Schnellladen mit:** Kann die Powerbank laut Vorlage mehr
+  als 5 V (z. B. INIU MegaPower 20000), ist der Haken „Schnellladen“ gleich
+  gesetzt. Vorher nahm die Vorlage ihn weg und es wurde nur 5 V geprüft.
+- **Abschalttest und Kapazitätstest zusammen:** Je Spannung wird über den
+  Nennstrom gesteigert (höchste Leistung), zum Schluss folgt die Kapazität.
+  Schaltet die Powerbank bei Überlast ab, meldet die App „Knopf drücken“
+  und macht danach weiter.
+
 ## 1.0.39 – 16.11.2026
 
 - **Powerbank mit Schnellladen:** Mit dem Haken „Schnellladen“ prüft der

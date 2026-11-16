@@ -12,14 +12,14 @@ from akkutest.geraet import Geraet
 from akkutest.simulator import SimNetzteil, SimPowerbank, SimulatorVerbindung
 
 
-def durchspielen(quelle, e, tempo=200, frist=60):
+def durchspielen(quelle, e, tempo=200, frist=60, extra=None):
     v = SimulatorVerbindung(protokoll="hid", akku=quelle, tempo=tempo, bericht_s=0.02)
     v.oeffnen()
     g = Geraet(v, intervall=0.02)
     assert g.erkennen(warten=0.2) == "hid", g.protokoll
     fertig = threading.Event()
     ereignisse = []
-    ab = nt.NetzteilAblauf(e, g, bei_ereignis=lambda a, t: (ereignisse.append((a, t)),
+    ab = nt.NetzteilAblauf(e, g, bei_ereignis=lambda a, t: (ereignisse.append((a, t)), extra and extra(a, t),
                                                            a == "fertig" and fertig.set()))
     g.bei_messwert = ab.messwert
     g.starten()
@@ -260,7 +260,7 @@ def test_powerbank_kapazitaet():
     # 2 Wh drin, 15 % Wandlerverlust: es kommen etwa 1,7 Wh heraus
     q = SimPowerbank(wh=2.0)
     e = pb(stufentest=False, kapazitaet=True, kap_a=1.0, mah=600)          # 600 mAh × 3,7 V = 2,22 Wh
-    assert nt.plan(e)[-1].art == "kapazitaet" and not any(s.art == "abschalt" for s in nt.plan(e))
+    assert nt.plan(e)[-1].art == "kapazitaet"
     assert 1000 < nt.geplant_s(e) < 2000
     ab, _ = durchspielen(q, e, frist=60)
     r = ab.ergebnis
@@ -337,6 +337,26 @@ def test_powerbank_mit_trigger():
     assert kap["zustand_proz"] and any("Darin enthalten" in h for h in kap["hinweise"])
     assert "Kapazitätstest" in [t for a, t in ev if a == "umschalten"][-1]
     assert r.haelt is True and r.urteil == "gut", (r.haelt, r.urteil)
+
+
+def test_powerbank_ueberlast_dann_kapazitaet():
+    # Abschalttest bis zur Überlast, dann Knopf drücken und bis leer
+    q = SimPowerbank(wh=2.0, abschalt_a=2.4)
+    e = pb(stufen=2, stufe_s=10, abschalttest=True, max_proz=150, kapazitaet=True, kap_a=1.0, mah=600)
+    arten = [s.art for s in nt.plan(e)]
+    assert arten.index("abschalt") < arten.index("kapazitaet") == len(arten) - 1, arten
+
+    def knopf_bei(a, t):
+        if a == "umschalten" and "Knopf" in t:
+            # Überlast: die Powerbank schläft - nach kurzer Zeit drückt jemand den Knopf
+            q.schlaeft = True
+            threading.Timer(0.1, q.knopf).start()
+    ab, ev = durchspielen(q, e, frist=60, extra=knopf_bei)
+    r = ab.ergebnis
+    print("Überlast, dann Kapazität:", r.grund, r.abschalt_a, r.kap_leer, r.energie_wh)
+    assert r.abschalt_a and 2.3 < r.abschalt_a <= 2.5, r.abschalt_a
+    assert r.kap_leer and 1.55 < r.energie_wh < 1.8 and r.zustand_proz
+    assert any(a == "umschalten" and "Knopf" in t for a, t in ev)
 
 
 def test_zu_hohe_spannung():

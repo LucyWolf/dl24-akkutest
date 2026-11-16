@@ -60,8 +60,8 @@ class PowerbankReiter(NetzteilReiter):
         self.kap_a.setValue(1.0)
         k.addWidget(self.mit_kap, 0, 0)
         k.addWidget(self.kap_a, 0, 1)
-        hinweis = QLabel("Die Powerbank vorher <b>ganz voll laden</b>. Danach ist sie leer – ein Abschalttest "
-                         "entfällt dann. Daraus ergibt sich der Akkuzustand: wie viel sie noch "
+        hinweis = QLabel("Die Powerbank vorher <b>ganz voll laden</b>. Der Kapazitätstest kommt zum Schluss, nach allen "
+                         "Spannungen und dem Abschalttest. Daraus ergibt sich der Akkuzustand: wie viel sie noch "
                          "von dem kann, was sie neu konnte (ab 80 % gut).")
         hinweis.setWordWrap(True)
         hinweis.setStyleSheet(gedaempft())
@@ -75,9 +75,6 @@ class PowerbankReiter(NetzteilReiter):
         self._breite_anpassen()               # neue Felder: sonst schneidet die linke Spalte ab
 
     def _kap_umschalten(self, an: bool) -> None:
-        if an:
-            self.mit_abschalt.setChecked(False)
-        self.mit_abschalt.setEnabled(not an and not self.laeuft)
         self._angabe_zeigen()
 
     def _felder_sperren(self) -> None:
@@ -104,6 +101,8 @@ class PowerbankReiter(NetzteilReiter):
             for (v, haken, a), (_, an, strom) in zip(self.trigger, d.get("trigger", [])):
                 haken.setChecked(an)
                 a.setValue(strom)
+            # kann sie Schnellladen, wird das auch geprüft - sonst bliebe es bei 5 V
+            self.schnell.setChecked(any(an and v > 5.5 for v, an, _ in d.get("trigger", [])))
         if isinstance(d, dict) and hasattr(self, "mah"):
             self.mah.setValue(d.get("mah", 0))
             self.zell_v.setValue(d.get("zell_v", 3.7))
