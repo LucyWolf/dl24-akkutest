@@ -28,6 +28,20 @@ ABSCHALT_SCHRITT = 0.05   # Abschalttest: +5 % des Nennstroms je Schritt
 ABSCHALT_STUFE_S = 10.0
 ZUSAMMENBRUCH = 0.5       # unter 50 % der Nennspannung gilt das Netzteil als aus
 
+# Powerbanks
+PB_WARTEN_S = 90.0        # so lange auf Spannung warten (Knopf an der Powerbank drücken)
+PB_KAP_MAX_S = 48 * 3600  # Kapazitätstest endet spätestens nach 48 h
+PB_ERWARTUNG = 0.65       # für die Restzeit-Schätzung: so viel der Aufdruck-Energie kommt meist an
+PB_GRUEN = 60.0           # Einschätzung der App (keine Vorgabe): ab so viel % der Aufdruck-Energie grün
+PB_GELB = 45.0            # darunter rot - die Angabe ist stark übertrieben
+PB_AUTOAUS_S = 180.0      # geht sie im Kapazitätstest früher aus, war es vielleicht die Abschaltautomatik
+PB_VORLAGEN = [
+    ("Powerbank 5 W", 5.0, 1.0),
+    ("Powerbank 10 W", 5.0, 2.0),
+    ("Powerbank 12 W", 5.0, 2.4),
+    ("Powerbank 15 W", 5.0, 3.0),
+]
+
 # Typenschild-Vorlagen: Name, Volt, Ampere
 VORLAGEN = [
     ("USB 2.0 Port", 5.0, 0.5),
@@ -80,6 +94,17 @@ class NetzteilEinstellung:
     fuehler: bool = True      # Temperaturfühler des DL24 auswerten (aus: Temperatur ignorieren)
     hub: bool = False         # USB-Hub: geprüft wird nur ein Port
     pd: bool = False          # höhere Spannung über USB-PD/QC: Grenzen nach USB-PD (vSrcNew/vSrcValid)
+    powerbank: bool = False   # Powerbank: Last nie unter mindest_a, kein Leerlauf
+    mah: float = 0.0          # Aufdruck: Kapazität der Zellen in mAh
+    zell_v: float = 3.7       # ... bezogen auf diese Zellspannung
+    wh: float = 0.0           # Aufdruck in Wh, falls angegeben (sonst aus mAh gerechnet)
+    mindest_a: float = 0.3    # darunter schalten sich viele Powerbanks von selbst ab
+    kapazitaet: bool = False  # bis leer entladen und Energie messen
+    kap_a: float = 1.0
+
+    @property
+    def aufdruck_wh(self) -> float:
+        return self.wh if self.wh > 0 else self.mah * self.zell_v / 1000
 
     @property
     def strom_a(self) -> float:
@@ -131,6 +156,8 @@ class NetzteilEinstellung:
 
     def hoechster_strom(self) -> float:
         a = self.strom_a
+        if self.powerbank and self.kapazitaet:
+            a = max(a if (self.stufentest or self.dauertest) else 0, self.kap_a)
         if self.abschalttest and self.bis_ende:
             return self.such_ende_a()
         if self.abschalttest:
@@ -145,8 +172,10 @@ class NetzteilEinstellung:
             return "Bitte die Nennspannung vom Typenschild eintragen."
         if self.strom_a <= 0:
             return "Bitte Nennstrom oder Nennleistung vom Typenschild eintragen."
-        if not (self.stufentest or self.dauertest or self.abschalttest):
+        if not (self.stufentest or self.dauertest or self.abschalttest or (self.powerbank and self.kapazitaet)):
             return "Bitte mindestens einen Test auswählen."
+        if self.powerbank and self.strom_a < self.mindest_a:
+            return "Der Nennstrom liegt unter dem Mindeststrom - Mindeststrom senken."
         w = self.hoechster_strom() * self.nenn_v
         if w > DL24_MAX_W:
             return (f"Der Test bräuchte bis zu {_k(w, 0)} W ({_k(self.hoechster_strom(), 2)} A × {self.nenn_v:g} V). "
@@ -267,6 +296,13 @@ class NetzteilErgebnis:
     spitze_v: float | None = None          # höchste Spannung der ganzen Prüfung (Leerlauf, Lastwechsel)
     unter_ab_a: float | None = None        # ab diesem Strom unter der gelben Grenze (USB 4,75 V)
     rot_ab_a: float | None = None          # ab diesem Strom unter der roten Grenze (USB 4,40 V)
+    energie_wh: float = 0.0                # Powerbank: insgesamt abgegeben (am DL24 gemessen)
+    ladung_mah: float = 0.0                # ... als Ladung bei der Ausgangsspannung
+    kap_s: float = 0.0                     # Dauer des Kapazitätstests
+    kap_leer: bool = False                 # bis zum Abschalten entladen
+    kap_anteil: float | None = None        # % der Aufdruck-Energie
+    kap_mah_zelle: float | None = None     # abgegebene Energie umgerechnet auf die Zellspannung
+    autoaus: bool = False                  # womöglich die Abschaltautomatik statt leer
 
     def als_dict(self) -> dict:
         d = dict(self.__dict__)
@@ -280,9 +316,20 @@ def plan(e: NetzteilEinstellung) -> list[Schritt]:
     s: list[Schritt] = []
     if e.stufentest:
         n = max(1, e.stufen)
-        s += [Schritt("stufe", round(a * k / n, 3), e.stufe_s) for k in range(1, n + 1)]
+        if e.powerbank:
+            # nie unter den Mindeststrom - sonst schaltet sich die Powerbank ab
+            lo = min(e.mindest_a, a)
+            s += [Schritt("stufe", round(lo + (a - lo) * (k - 1) / max(1, n - 1), 3), e.stufe_s)
+                  for k in range(1, n + 1)]
+        else:
+            s += [Schritt("stufe", round(a * k / n, 3), e.stufe_s) for k in range(1, n + 1)]
     if e.dauertest:
-        s.append(Schritt("dauer", round(a * e.dauer_proz / 100, 3), e.dauer_min * 60))
+        s.append(Schritt("dauer", round(max(a * e.dauer_proz / 100, e.mindest_a if e.powerbank else 0), 3),
+                         e.dauer_min * 60))
+    if e.powerbank and e.kapazitaet:
+        # bis leer - danach ist nichts mehr zu prüfen, ein Abschalttest entfällt
+        s.append(Schritt("kapazitaet", round(max(e.kap_a, e.mindest_a), 3), PB_KAP_MAX_S))
+        return s
     if e.abschalttest:
         bis = e.such_ende_a() / a if e.bis_ende else e.max_proz / 100
         k = 1.0 + ABSCHALT_SCHRITT
@@ -292,6 +339,20 @@ def plan(e: NetzteilEinstellung) -> list[Schritt]:
         if e.bis_ende and (not s or s[-1].soll_a < e.such_ende_a() - 1e-6):
             s.append(Schritt("abschalt", round(e.such_ende_a(), 3), ABSCHALT_STUFE_S))
     return s
+
+
+def kap_schaetzung_s(e: NetzteilEinstellung) -> float:
+    """Wie lange der Kapazitätstest etwa dauert - aus dem Aufdruck geschätzt."""
+    if not (e.powerbank and e.kapazitaet):
+        return 0.0
+    w = max(e.kap_a, e.mindest_a) * e.nenn_v
+    wh = e.aufdruck_wh * PB_ERWARTUNG if e.aufdruck_wh > 0 else 10.0
+    return wh / w * 3600 if w > 0 else 0.0
+
+
+def geplant_s(e: NetzteilEinstellung) -> float:
+    """Geplante Dauer - der Kapazitätstest mit seiner Schätzung statt der Höchstdauer."""
+    return sum(x.dauer_s for x in plan(e) if x.art != "kapazitaet") + kap_schaetzung_s(e)
 
 
 def widerstand(stufen: list) -> float | None:
@@ -448,22 +509,101 @@ def bewerten(e: NetzteilEinstellung, r: NetzteilErgebnis) -> None:
         knapp = True
         gruende.append(f"Spannung schwankt bei {_k(unruhig.soll_a)} A um {_k(unruhig.schwankung * 1000, 0)} mV "
                        f"(über {_k(SCHWANK_ROT * 100, 0)} % – Einschätzung der App)")
+    pb_gut = False
+    if e.powerbank:
+        r.kap_anteil = r.kap_mah_zelle = None
+        if r.energie_wh > 0 and e.zell_v > 0:
+            r.kap_mah_zelle = round(r.energie_wh / e.zell_v * 1000)
+        if e.kapazitaet and r.kap_leer and e.aufdruck_wh > 0:
+            r.kap_anteil = round(r.energie_wh / e.aufdruck_wh * 100, 1)
+            z = kap_ampel(r.kap_anteil)
+            if z == "rot":
+                schlimm = True
+                r.verspricht = False
+                gruende.append(f"Liefert nur {_k(r.energie_wh, 1)} Wh von {_k(e.aufdruck_wh, 1)} Wh laut Aufdruck "
+                               f"({_k(r.kap_anteil, 0)} %) – Angabe stark übertrieben (unter {_k(PB_GELB, 0)} %, "
+                               "Einschätzung der App)")
+            elif z == "gelb":
+                knapp = True
+                gruende.append(f"Liefert {_k(r.energie_wh, 1)} Wh von {_k(e.aufdruck_wh, 1)} Wh laut Aufdruck "
+                               f"({_k(r.kap_anteil, 0)} %) – weniger als üblich (unter {_k(PB_GRUEN, 0)} %, "
+                               "Einschätzung der App)")
+            else:
+                pb_gut = True
+                gruende.append(f"Liefert {_k(r.energie_wh, 1)} Wh von {_k(e.aufdruck_wh, 1)} Wh laut Aufdruck "
+                               f"({_k(r.kap_anteil, 0)} %) – im üblichen Bereich")
+        if e.kapazitaet and r.autoaus:
+            gruende.append(f"Nach nur {dauer_kurz(r.kap_s)} aus – leer oder Abschaltautomatik?")
     if schlimm:
         r.urteil = "nicht"
     elif knapp:
         r.urteil = "eingeschraenkt"
     elif offen:
         r.urteil = "offen"
-    elif r.verspricht and not e.unbekannt:
+    elif (r.verspricht or (pb_gut and r.verspricht is None)) and not e.unbekannt:
         r.urteil = "gut"
     else:
         r.urteil = None
-    if r.urteil == "gut":
+    if r.urteil == "gut" and r.verspricht:
         gruende.append("Liefert den angegebenen Strom, Spannung im vorgegebenen Bereich")
     if e.usb and r.urteil in ("gut", "eingeschraenkt", "nicht", "offen"):
         gruende.append("Grenzwerte für einen Port mit eigener Stromversorgung (High-power-Port)")
     r.gruende = gruende
-    r.laien = laien_saetze(e, r, tiefst)
+    r.laien = laien_saetze(e, r, tiefst) + pb_saetze(e, r)
+
+
+def kap_ampel(anteil: float) -> str:
+    return "gruen" if anteil >= PB_GRUEN else "gelb" if anteil >= PB_GELB else "rot"
+
+
+def dauer_kurz(s: float) -> str:
+    s = int(round(s))
+    if s < 60:
+        return f"{s} s"
+    if s < 3600:
+        return f"{s // 60} min {s % 60:02d} s"
+    return f"{s // 3600} h {s % 3600 // 60:02d} min"
+
+
+def pb_saetze(e: NetzteilEinstellung, r: NetzteilErgebnis) -> list[str]:
+    """Powerbank in einfachen Sätzen: wie viel steckt wirklich drin?"""
+    s: list[str] = []
+    if not (e.powerbank and e.kapazitaet):
+        return s
+    if not r.kap_leer:
+        if r.energie_wh > 0:
+            s.append(f"Bis zum Abbruch gab die Powerbank {_k(r.energie_wh, 1)} Wattstunden ab. Sie war noch nicht "
+                     "leer – die Kapazität ist daher nicht vollständig gemessen.")
+        return s
+    zelle = f"{_k(r.kap_mah_zelle, 0)} mAh" if r.kap_mah_zelle else "–"
+    if e.aufdruck_wh > 0 and r.kap_anteil is not None:
+        auf = f"{_k(e.mah, 0)} mAh" if e.mah else f"{_k(e.aufdruck_wh, 1)} Wh"
+        s.append(f"Auf der Powerbank stehen {auf} ({_k(e.aufdruck_wh, 1)} Wattstunden). Herausgekommen sind "
+                 f"{_k(r.energie_wh, 1)} Wattstunden – das sind {_k(r.kap_anteil, 0)} % (umgerechnet {zelle} "
+                 f"bei {_k(e.zell_v, 1)} V).")
+        z = kap_ampel(r.kap_anteil)
+        if z == "gruen":
+            s.append("Das ist normal: Beim Umwandeln der Akkuspannung auf 5 Volt gehen immer etwa 20–40 % "
+                     "verloren.")
+        elif z == "gelb":
+            s.append("Das ist weniger als üblich. Der Akku ist vielleicht gealtert, oder die Angabe ist etwas "
+                     "geschönt.")
+        else:
+            s.append("Das ist viel zu wenig. Die Angabe auf der Powerbank stimmt nicht – das ist typisch für "
+                     "gefälschte oder sehr billige Powerbanks.")
+    else:
+        s.append(f"Die Powerbank gab {_k(r.energie_wh, 1)} Wattstunden ab ({_k(r.ladung_mah, 0)} mAh bei "
+                 f"{_k(e.nenn_v, None)} V, umgerechnet {zelle} bei {_k(e.zell_v, 1)} V). Ohne Angabe auf der "
+                 "Powerbank lässt sich nicht vergleichen.")
+    handy = r.energie_wh / 15 if r.energie_wh else 0
+    if handy >= 0.5:
+        s.append(f"Zum Vergleich: Ein Handy-Akku hat etwa 15 Wattstunden – das reicht also für etwa "
+                 f"{_k(handy, 1)} Ladungen (grob geschätzt).")
+    if r.autoaus:
+        s.append(f"Achtung: Die Powerbank ging schon nach {dauer_kurz(r.kap_s)} aus. War sie nicht voll "
+                 "geladen, ist das Ergebnis zu niedrig. Manche Powerbanks schalten sich auch von selbst ab – "
+                 "dann den Strom für den Kapazitätstest erhöhen.")
+    return s
 
 
 def laien_saetze(e: NetzteilEinstellung, r: NetzteilErgebnis, tiefst: float | None) -> list[str]:
@@ -574,6 +714,8 @@ class NetzteilAblauf:
         self._ll: list[float] = []
         self._aus = 0
         self._zu_wenig = 0
+        self._pb_seit: float | None = None
+        self._letzt: Messwert | None = None
         self.steuerbar = bool(self.geraet and self.geraet.kann_steuern)
 
     @property
@@ -587,9 +729,14 @@ class NetzteilAblauf:
     def beschreibung(self) -> str:
         s = self.schritt
         if self.zustand == "leerlauf":
-            return "Leerlaufspannung messen"
+            return ("Powerbank einschalten (Knopf drücken) – warte auf Spannung" if self.einstellung.powerbank
+                    else "Leerlaufspannung messen")
         if not s:
             return ""
+        if self.zustand == "laeuft" and s.art == "kapazitaet":
+            r = self.ergebnis
+            return (f"Kapazitätstest: {_k(s.soll_a, 2)} A bis leer · bisher {_k(r.energie_wh, 2)} Wh "
+                    f"({_k(r.ladung_mah, 0)} mAh)")
         text = {"stufe": "Stufentest", "dauer": "Dauertest", "abschalt": "Abschalttest"}[s.art]
         anteil = s.soll_a / self.einstellung.strom_a * 100
         return f"{text}: {_k(s.soll_a, 2)} A ({_k(anteil, 0)} %), Schritt {self.i + 1}/{len(self.schritte)}"
@@ -599,8 +746,16 @@ class NetzteilAblauf:
         s = self.schritt
         if self.zustand != "laeuft" or s is None:
             return None
+        if s.art == "kapazitaet":
+            # aus dem Aufdruck geschätzt: was noch fehlt bis zur üblichen Ausbeute
+            e = self.einstellung
+            rest_wh = max(0.0, e.aufdruck_wh * PB_ERWARTUNG - self.ergebnis.energie_wh) if e.aufdruck_wh else 0
+            im = rest_wh / max(0.1, s.soll_a * e.nenn_v) * 3600
+            return im, im
         im = max(0.0, s.dauer_s - (jetzt - self._schritt_t0))
-        return im, im + sum(x.dauer_s for x in self.schritte[self.i + 1:])
+        rest = sum(x.dauer_s if x.art != "kapazitaet" else kap_schaetzung_s(self.einstellung)
+                   for x in self.schritte[self.i + 1:])
+        return im, im + rest
 
     def messwert(self, m: Messwert) -> None:
         try:
@@ -620,8 +775,54 @@ class NetzteilAblauf:
         self._beenden("von Hand abgebrochen", False, "abgebrochen")
 
     # ------------------------------------------------------------------
+    def _pb_start(self, m: Messwert) -> None:
+        """Powerbank: kein Leerlauf - sie schaltet sich ohne Last ab. Gleich mit dem
+        Mindeststrom belasten und warten, bis Spannung kommt."""
+        e, r = self.einstellung, self.ergebnis
+        if self._pb_seit is None:
+            self._pb_seit = m.zeit
+            self.geraet.abschaltung_setzen(round(e.nenn_v * ZUSAMMENBRUCH, 2))
+            self.geraet.strom_setzen(e.mindest_a)
+            self.geraet.last(True)
+            self.bei_ereignis("info", "Powerbank einschalten (Knopf drücken) – warte auf Spannung …")
+            return
+        da = m.spannung >= e.nenn_v * ZUSAMMENBRUCH
+        if not da:
+            self._ll.clear()
+            if m.zeit - self._pb_seit > PB_WARTEN_S:
+                self._last_aus()
+                self._beenden(f"Keine Spannung von der Powerbank ({_k(m.spannung, 2)} V). Ist sie eingeschaltet "
+                              "und geladen, und steckt das Kabel am DL24?", False, "abgebrochen")
+            return
+        if not m.an:
+            self.geraet.last(True)          # Spannung kam erst jetzt - Last wieder an
+            return
+        if m.strom < e.mindest_a * 0.8:
+            return
+        self._ll.append(m.spannung)
+        if len(self._ll) < 3:
+            return
+        r.leerlauf_v = round(sum(self._ll) / len(self._ll), 3)
+        r.spitze_v = max(self._ll)
+        r.temp_start = m.temp_fuehler if e.fuehler else None
+        if r.leerlauf_v > e.nenn_v * 1.25:
+            self._last_aus()
+            self._beenden(f"Die Spannung ({_k(r.leerlauf_v, 2)} V) liegt weit über der Angabe ({e.nenn_v:g} V) - "
+                          "falsches Gerät oder falsche Angabe?", False, "abgebrochen")
+            return
+        self.geraet.zaehler_null()
+        self._t0 = m.zeit
+        self._letzt = m
+        self.zustand = "laeuft"
+        self.bei_ereignis("info", f"Powerbank liefert {_k(r.leerlauf_v, 3)} V bei {_k(e.mindest_a, 2)} A – "
+                                  "Test beginnt")
+        self._naechster(m)
+
     def _leerlauf(self, m: Messwert) -> None:
         e = self.einstellung
+        if e.powerbank:
+            self._pb_start(m)
+            return
         if m.an or m.strom > STROM_AUS:
             self.geraet.last(False)
             self._ll.clear()
@@ -660,7 +861,7 @@ class NetzteilAblauf:
             self._fertig()
             return
         self._schritt_t0 = m.zeit
-        art = {"stufe": "", "dauer": "Dauer ", "abschalt": "↑ "}[s.art]
+        art = {"stufe": "", "dauer": "Dauer ", "abschalt": "↑ ", "kapazitaet": "Kapazität "}[s.art]
         self.ergebnis.marken.append((round(m.zeit - (self._t0 or m.zeit), 1),
                                      f"{art}{_k(s.soll_a, 2)} A".replace(".", ",")))
         self._werte = []
@@ -677,6 +878,15 @@ class NetzteilAblauf:
         temp = m.temp_fuehler if e.fuehler else None    # Fühler abgewählt: Temperatur ignorieren
         r.spitze_v = m.spannung if r.spitze_v is None else max(r.spitze_v, m.spannung)
         self.punkte.append((round(t, 1), m.spannung, m.strom, temp))
+        if e.powerbank and self._letzt is not None:
+            # abgegebene Energie selbst aufsummieren (Trapez zwischen zwei Messwerten)
+            dt = max(0.0, m.zeit - self._letzt.zeit)
+            if dt < 30:
+                p_mittel = (m.spannung * m.strom + self._letzt.spannung * self._letzt.strom) / 2
+                i_mittel = (m.strom + self._letzt.strom) / 2
+                r.energie_wh = round(r.energie_wh + p_mittel * dt / 3600, 4)
+                r.ladung_mah = round(r.ladung_mah + i_mittel * dt / 3.6, 2)
+        self._letzt = m
         if temp is not None:
             r.temp_max = temp if r.temp_max is None else max(r.temp_max, temp)
             if temp >= e.temp_grenze:
@@ -697,23 +907,40 @@ class NetzteilAblauf:
         # Kommt der Strom nicht an, liefert das Netzteil ihn nicht
         zu_wenig = m.strom < s.soll_a * 0.9 - 0.01
         self._zu_wenig = self._zu_wenig + 1 if zu_wenig and not weg else 0
+        if (self._aus >= 2 or self._zu_wenig >= 3) and s.art == "kapazitaet":
+            self._last_aus()
+            r.kap_s = round(im_schritt, 1)
+            r.kap_leer = True
+            r.autoaus = im_schritt < PB_AUTOAUS_S
+            self._fertig(f"Powerbank leer: nach {dauer_kurz(r.kap_s)} abgeschaltet")
+            return
         if self._aus >= 2 or self._zu_wenig >= 3:
             self._last_aus()
             art = "abgeschaltet" if self._aus >= 2 else "eingebrochen"
             r.abschalt_a, r.abschalt_art = s.soll_a, art   # diese Stufe zählt nicht als geschafft
-            text = (f"Netzteil hat bei {_k(s.soll_a, 2)} A abgeschaltet" if art == "abgeschaltet"
-                    else f"Netzteil liefert {_k(s.soll_a, 2)} A nicht (nur {_k(m.strom, 2)} A)")
+            geraet = "Powerbank" if e.powerbank else "Netzteil"
+            text = (f"{geraet} hat bei {_k(s.soll_a, 2)} A abgeschaltet" if art == "abgeschaltet"
+                    else f"{geraet} liefert {_k(s.soll_a, 2)} A nicht (nur {_k(m.strom, 2)} A)")
+            if e.powerbank and art == "abgeschaltet" and s.soll_a <= e.mindest_a + 1e-6:
+                text += (" – schon beim Mindeststrom: Abschaltautomatik (Mindeststrom erhöhen) oder die "
+                         "Powerbank ist leer")
             self._fertig(text)
             return
         if not (weg or zu_wenig):
             self._werte.append(m)
+        if s.art == "kapazitaet":
+            r.kap_s = round(im_schritt, 1)
         if im_schritt >= s.dauer_s:
+            if s.art == "kapazitaet":
+                self._last_aus()
+                self._fertig(f"Nach {dauer_kurz(s.dauer_s)} noch nicht leer - Kapazitätstest beendet")
+                return
             self._werten_schritt()
             self._naechster(m)
 
     def _werten_schritt(self) -> None:
         s, e = self.schritt, self.einstellung
-        if not s or not self._werte:
+        if not s or not self._werte or s.art == "kapazitaet":
             return
         # nur die zweite Hälfte: dann hat sich die Spannung gesetzt
         w = self._werte[len(self._werte) // 2:]

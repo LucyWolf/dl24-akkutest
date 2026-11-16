@@ -80,6 +80,38 @@ class SimNetzteil:
         self.temperatur += (ziel - self.temperatur) * min(1.0, dt / 300)
 
 
+class SimPowerbank(SimNetzteil):
+    """Powerbank: begrenzte Energie, danach aus. Unter auto_aus_a schaltet sie sich nach
+    auto_s Sekunden von selbst ab und bleibt aus, bis der Knopf gedrückt wird."""
+
+    def __init__(self, wh=0.5, auto_aus_a=0.1, auto_s=20.0, **kw):
+        kw.setdefault("innen_mohm", 150)
+        kw.setdefault("abschalt_a", 3.2)
+        super().__init__(5.0, **kw)
+        self.rest_wh, self.auto_aus_a, self.auto_s = wh, auto_aus_a, auto_s
+        self.schlaeft = False
+        self._wenig_s = 0.0
+
+    def knopf(self) -> None:
+        self.schlaeft = False
+        self._wenig_s = 0.0
+
+    def spannung(self, strom: float) -> float:
+        if self.schlaeft or self.rest_wh <= 0:
+            return 0.0
+        return super().spannung(strom)
+
+    def schritt(self, dt: float, strom: float) -> None:
+        u = self.spannung(strom)
+        super().schritt(dt, strom)
+        if self.schlaeft or self.rest_wh <= 0:
+            return
+        self.rest_wh -= u * strom * dt / 3600 / 0.85       # Wandlerverlust innen
+        self._wenig_s = self._wenig_s + dt if strom < self.auto_aus_a else 0.0
+        if self._wenig_s > self.auto_s:
+            self.schlaeft = True
+
+
 class SimDL24:
     """Das Gerät: Last, Zähler, Abschaltung - und die beiden Protokolle."""
 

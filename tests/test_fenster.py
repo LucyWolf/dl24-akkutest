@@ -120,7 +120,7 @@ def test_ganzer_ablauf():
     assert "Zelle A" in inhalt and "Zustand %" in inhalt
 
     # Diagnose zeigt die Bytes
-    f.reiter.setCurrentIndex(4)
+    f.reiter.setCurrentIndex(5)
     assert "> B1 B2 11" in f.diag.toPlainText()
     assert "< CA CB" in f.diag.toPlainText()
     foto(f, "5-diagnose")
@@ -350,8 +350,8 @@ def test_steuerung_von_hand():
     SimulatorVerbindung.voreinstellung = {"tempo": 5}
     f = fenster.Fenster(Speicher())
     f.show()
-    f.reiter.setCurrentIndex(3)
-    assert f.reiter.tabText(3) == "Steuerung"
+    f.reiter.setCurrentIndex(4)
+    assert f.reiter.tabText(4) == "Steuerung"
     assert not f.steuerung.knopf_ein.isEnabled()
     f.anschluss.setCurrentIndex(f.anschluss.findText("Simulator – USB-Ladegerät", flags=fenster.Qt.MatchStartsWith))
     f.verbinden_umschalten()
@@ -453,6 +453,72 @@ def test_schnellladen_im_fenster():
     alle = sp.netzteil_tests()
     assert alle[0]["name"] == "Schnelllader" and f.nt.tabelle.item(0, 2).text() == "PD/QC 5/9 V", f.nt.tabelle.item(0, 2).text()
     assert f.nt.tabelle.item(0, 4).text().startswith("bis ")
+    f.trennen()
+    f.close()
+
+
+def test_powerbank_im_fenster():
+    geraet.HID_INTERVALL = 0.02
+    SimulatorVerbindung.voreinstellung = {"tempo": 100}
+    sp = Speicher()
+    f = fenster.Fenster(sp)
+    f.resize(1280, 1000)
+    f.show()
+    f.reiter.setCurrentIndex(3)
+    assert f.reiter.tabText(3) == "Powerbanks"
+    pb = f.pb
+    assert not pb.schnell.isVisible() and not pb.unbekannt.isVisible() and pb.mah.isVisible()
+    assert not pb.knopf_start.isEnabled() and not pb.tests_gruppe.isEnabled()
+    f.anschluss.setCurrentIndex(f.anschluss.findText("Simulator – Powerbank", flags=fenster.Qt.MatchStartsWith))
+    f.verbinden_umschalten()
+    assert warten(lambda: f.geraet is not None and f.letzter is not None), meldungen
+    pb.vorlage.setCurrentIndex(pb.vorlage.findText("Powerbank 10 W", flags=fenster.Qt.MatchStartsWith))
+    pb._vorlage()
+    assert pb.nenn_a.value() == 2.0 and pb.knopf_start.isEnabled()
+    assert f.nt.vorlage.findText("Powerbank 10 W", flags=fenster.Qt.MatchStartsWith) < 0   # nicht beim Netzteil
+    pb.name.setText("Test-Powerbank")
+    pb.mah.setValue(600)
+    assert "2,2 Wh" in pb.angabe_hinweis.text(), pb.angabe_hinweis.text()
+    pb.stufen.setValue(2)
+    pb.stufe_s.setValue(10)
+    pb.mit_abschalt.setChecked(True)
+    pb.mit_kap.setChecked(True)
+    assert not pb.mit_abschalt.isChecked() and not pb.mit_abschalt.isEnabled()   # danach ist sie leer
+    e = pb.einstellung()
+    assert e.powerbank and e.kapazitaet and e.mah == 600 and e.mindest_a == 0.3 and not e.hub
+    assert "Kapazitätstest" in pb.dauer.text(), pb.dauer.text()
+    pb.starten()
+    assert pb.laeuft and not f.nt.knopf_start.isEnabled() and not f.knopf_start.isEnabled()
+    assert warten(lambda: "Kapazitätstest" in pb.schritt.text(), 30), pb.schritt.text()
+    foto(f, "14-powerbank-laeuft")
+    assert warten(lambda: not pb.laeuft, 90), pb.ablauf.zustand
+    r = pb.ablauf.ergebnis
+    print("Powerbank:", r.grund, r.energie_wh, r.kap_anteil, r.urteil)
+    assert r.kap_leer and r.urteil == "gut"
+    text = pb.ergebnis.text()
+    assert "Abgegeben" in text and "vom Aufdruck" in text and "600 mAh" in text, text
+    from PySide6.QtWidgets import QTextBrowser
+    gross = pb._fenster.findChild(QTextBrowser).toPlainText()
+    assert "Kurz gesagt" in gross and "Wattstunden" in gross and "nie weniger als 0,30 Ampere" in gross, gross
+    foto(pb._fenster, "15-powerbank-ergebnis")
+    pb._fenster.close()
+    assert pb.tabelle.rowCount() == 1 and "Wh" in pb.tabelle.item(0, 4).text()
+    # Netzteil-Liste bleibt sauber (frühere Tests haben dort schon Einträge)
+    assert all(not d["einstellung"].get("powerbank") for d in f.nt._alle)
+    assert len(sp.netzteil_tests()) == len(f.nt._alle) + 1
+    pdf = Path(os.environ["AKKUTEST_DATEN"]) / "powerbank.pdf"
+    assert pb.bericht_speichern(str(pdf)) == str(pdf) and pdf.stat().st_size > 20000
+    if FOTOS:
+        import shutil
+        shutil.copy(pdf, FOTOS / "powerbank.pdf")
+    # eigene Vorlage: nur im Powerbank-Reiter, mit Kapazität
+    pb.vorlage_speichern()
+    assert pb.vorlage.currentText() == "★ Test-Powerbank"
+    pb.mah.setValue(0)
+    pb._vorlage()
+    assert pb.mah.value() == 600
+    f.nt.vorlagen_laden()
+    assert f.nt.vorlage.findText("★ Test-Powerbank") < 0
     f.trennen()
     f.close()
 

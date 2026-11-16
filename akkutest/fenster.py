@@ -129,6 +129,9 @@ class Fenster(QMainWindow):
         from .netzteil_reiter import NetzteilReiter      # hier: der Reiter nutzt Teile dieser Datei
         self.nt = NetzteilReiter(self)
         self.reiter.addTab(self.nt, "Ladegeräte && Netzteile")
+        from .powerbank_reiter import PowerbankReiter
+        self.pb = PowerbankReiter(self)
+        self.reiter.addTab(self.pb, "Powerbanks")
         from .steuerung_reiter import SteuerungReiter
         self.steuerung = SteuerungReiter(self)
         self.reiter.addTab(self.steuerung, "Steuerung")
@@ -172,6 +175,8 @@ class Fenster(QMainWindow):
             self.anschluss.addItem(a.name, a)
         self.anschluss.addItem("Simulator – USB-Ladegerät 5 V / 2 A",
                                verbindung.Anschluss("sim", "sim:netzteil", "Simulator (Ladegerät)"))
+        self.anschluss.addItem("Simulator – Powerbank 5 V / 2 A (2 Wh)",
+                               verbindung.Anschluss("sim", "sim:powerbank", "Simulator (Powerbank)"))
         self.anschluss.addItem("Simulator – ausprobieren ohne Gerät", verbindung.Anschluss("sim", "sim:px100", "Simulator"))
         self.anschluss.addItem("Simulator – Gerät ohne Fernsteuerung",
                                verbindung.Anschluss("sim", "sim:atorch", "Simulator (nur Berichte)"))
@@ -256,11 +261,21 @@ class Fenster(QMainWindow):
                 f"geschrieben:\n{datenordner() / 'akkutest.log'}\n\n"
                 "Lass sie ein paar Sekunden laufen und schick die Datei – damit wird das Format eingebaut.")
 
+    @property
+    def pruef_reiter(self) -> list:
+        """Reiter, die selbst eine Prüfung fahren (Netzteile, Powerbanks)."""
+        return [r for r in (getattr(self, "nt", None), getattr(self, "pb", None)) if r is not None]
+
+    @property
+    def pruefung_laeuft(self):
+        return next((r for r in self.pruef_reiter if r.laeuft), None)
+
     def trennen(self) -> None:
-        if self.nt.laeuft:
+        r = self.pruefung_laeuft
+        if r:
             if not self._frage("Trennen", "Es läuft eine Prüfung. Wirklich trennen? Sie wird abgebrochen."):
                 return
-            self.nt.abbrechen(ohne_frage=True)
+            r.abbrechen(ohne_frage=True)
         if self.ablauf and self.ablauf.laeuft:
             if not self._frage("Trennen", "Es läuft ein Test. Wirklich trennen? Der Test wird abgebrochen."):
                 return
@@ -275,8 +290,9 @@ class Fenster(QMainWindow):
         if not self.geraet:
             return
         self.geraet = None
-        if self.nt.laeuft:
-            self.nt.verbindung_weg(grund)
+        r = self.pruefung_laeuft
+        if r:
+            r.verbindung_weg(grund)
             grund += "\n\nDie Prüfung wurde abgebrochen. Die Last läuft am Gerät womöglich weiter."
         if self.ablauf and self.ablauf.laeuft:
             self.ablauf.zustand = "abgebrochen"
@@ -305,9 +321,11 @@ class Fenster(QMainWindow):
             self.status.setText("nicht verbunden")
         laeuft = bool(self.ablauf and self.ablauf.laeuft)
         bekannt = bool(g) and g.protokoll != "unbekannt"
-        self.nt.zustand_zeigen(g, laeuft)
-        self.steuerung.zustand_zeigen(g, laeuft or self.nt.laeuft)
-        self.knopf_start.setEnabled(bekannt and not laeuft and not self.nt.laeuft)
+        for r in self.pruef_reiter:
+            r.zustand_zeigen(g, laeuft or any(x.laeuft for x in self.pruef_reiter if x is not r))
+        pruefung = self.pruefung_laeuft is not None
+        self.steuerung.zustand_zeigen(g, laeuft or pruefung)
+        self.knopf_start.setEnabled(bekannt and not laeuft and not pruefung)
         self.knopf_abbruch.setEnabled(laeuft)
         self.knopf_erkennen.setEnabled(bekannt and not laeuft)
         for w in (self.akku_wahl, self.name, self.modell, self.typ, self.zellen, self.nenn, self.strom, self.abschalt):
@@ -592,12 +610,14 @@ class Fenster(QMainWindow):
         ab = self.ablauf
         if ab and ab.laeuft:
             ab.messwert(m)
-        self.nt.messwert_faden(m)
+        for r in self.pruef_reiter:
+            r.messwert_faden(m)
         self.b.messwert.emit(m)
 
     def _messwert(self, m: Messwert) -> None:
         self.letzter = m
-        self.nt.messwert(m)
+        for r in self.pruef_reiter:
+            r.messwert(m)
         self.steuerung.messwert(m)
         a = self.anz
         # Im Atorch-Bericht (Bluetooth) kommt die Spannung nur in 0,1-V-Schritten -
@@ -623,9 +643,10 @@ class Fenster(QMainWindow):
                 self.kurve_linie.setData([x[0] / 60 for x in punkte], [x[1] for x in punkte])
 
     def _ereignis(self, art: str, text: str) -> None:
-        if art.startswith("nt:"):
-            self.nt.ereignis(art[3:], text)
-            return
+        for r in self.pruef_reiter:
+            if art.startswith(r.kennung + ":"):
+                r.ereignis(art[len(r.kennung) + 1:], text)
+                return
         if art == "fertig":
             self._test_fertig()
             return
@@ -903,12 +924,13 @@ class Fenster(QMainWindow):
         return QMessageBox.question(self, titel, text) == QMessageBox.Yes
 
     def closeEvent(self, ereignis) -> None:
-        if self.nt.laeuft:
+        r = self.pruefung_laeuft
+        if r:
             if not self._frage("Beenden", "Es läuft eine Prüfung. Wirklich beenden?\n\n"
                                           "Die Last wird ausgeschaltet."):
                 ereignis.ignore()
                 return
-            self.nt.ablauf.abbrechen()
+            r.ablauf.abbrechen()
         if self.ablauf and self.ablauf.laeuft:
             if not self._frage("Beenden", "Es läuft ein Test. Wirklich beenden?\n\n"
                                           "Die Last wird ausgeschaltet."):

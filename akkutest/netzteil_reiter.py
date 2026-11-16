@@ -119,9 +119,20 @@ def messaufbau_html(e: dict, r: dict) -> str:
 def geprueft_text(e: dict, r: dict) -> str:
     """Was wurde gemacht - in einem Satz, ohne Fachwörter."""
     stufen = [s for t in (r.get("teile") or [{"ergebnis": r}]) for s in t["ergebnis"].get("stufen") or []]
+    if not stufen and e.get("powerbank") and e.get("kapazitaet"):
+        return (f"Die Powerbank wurde mit {zahl(e.get('kap_a', 1), 2)} Ampere bis zum Abschalten entladen und dabei "
+                "gemessen, wie viel Energie herauskommt.")
     if not stufen:
         return ""
     lo, hi = min(s["soll_a"] for s in stufen), max(s["soll_a"] for s in stufen)
+    if e.get("powerbank"):
+        text = (f"Die Powerbank wurde mit einer elektronischen Last (Atorch DL24) belastet – in Stufen von "
+                f"{zahl(lo)} bis {zahl(hi)} Ampere, nie weniger als {zahl(e.get('mindest_a', 0.3), 2)} Ampere, "
+                "damit sie sich nicht von selbst abschaltet.")
+        if e.get("kapazitaet"):
+            text += (f" Danach wurde sie mit {zahl(e.get('kap_a', 1), 2)} Ampere bis zum Abschalten entladen und "
+                     "dabei gemessen, wie viel Energie herauskommt.")
+        return text
     text = (f"Das Gerät wurde mit einer elektronischen Last (Atorch DL24) Schritt für Schritt stärker belastet – "
             f"von {zahl(lo)} bis {zahl(hi)} Ampere – und dabei wurde gemessen, wie viel Spannung noch ankommt. "
             "Ein gutes Netzteil hält die Spannung auch unter Last fast gleich.")
@@ -144,7 +155,15 @@ def ergebnis_html(e: dict, r: dict, fach: bool = False) -> str:
     unbekannt = e.get("unbekannt", False)
     if unbekannt:
         angabe = f"{_kurz(e['nenn_v'])} V, Strom unbekannt"
-    zeilen = [f"<b style='font-size:15px'>{html.escape(e['name'] or 'Netzteil')}</b> – {angabe}"]
+    pb = e.get("powerbank", False)
+    if pb:
+        auf = (e.get("wh") or 0) or (e.get("mah", 0) * e.get("zell_v", 3.7) / 1000)
+        if e.get("mah"):
+            angabe += f" · {_kurz(e['mah'])} mAh ({zahl(auf, 1)} Wh)"
+        elif auf:
+            angabe += f" · {zahl(auf, 1)} Wh"
+    zeilen = [f"<b style='font-size:15px'>{html.escape(e['name'] or ('Powerbank' if pb else 'Netzteil'))}</b> "
+              f"– {angabe}"]
     if unbekannt:
         best = nt.bestleistung(r)
         if best:
@@ -165,8 +184,25 @@ def ergebnis_html(e: dict, r: dict, fach: bool = False) -> str:
         zeilen.append("<b style='color:gray; font-size:14px'>Nicht entschieden</b> – der Nennstrom wurde nicht "
                       "vollständig geprüft")
     tab = []
+    if pb and r.get("energie_wh"):
+        text = (f"<b>{zahl(r['energie_wh'], 2)} Wh</b> · {zahl(r.get('ladung_mah', 0), 0)} mAh bei "
+                f"{_kurz(e['nenn_v'])} V")
+        if r.get("kap_mah_zelle"):
+            text += f" · umgerechnet {zahl(r['kap_mah_zelle'], 0)} mAh bei {zahl(e.get('zell_v', 3.7), 1)} V"
+        if r.get("kap_anteil") is not None:
+            z = nt.kap_ampel(r["kap_anteil"])
+            text += f" · <b style='color:{AMPEL[z]}'>{zahl(r['kap_anteil'], 0)} % vom Aufdruck</b>"
+        if e.get("kapazitaet") and not r.get("kap_leer"):
+            text += " <span style='color:gray'>(nicht bis leer gemessen)</span>"
+        tab.append(("Abgegeben", text))
+        if r.get("kap_s"):
+            tab.append(("Kapazitätstest", f"{nt.dauer_kurz(r['kap_s'])} bei {zahl(e.get('kap_a', 1), 2)} A"))
     if r.get("leerlauf_v") is not None:
-        tab.append(("Leerlauf", f"{zahl(r['leerlauf_v'], 3)} V (erlaubt {zahl(unten)}–{zahl(oben)} V)"))
+        if pb:
+            tab.append((f"Bei {zahl(e.get('mindest_a', 0.3), 2)} A", f"{zahl(r['leerlauf_v'], 3)} V "
+                                                                    f"(erlaubt {zahl(unten)}–{zahl(oben)} V)"))
+        else:
+            tab.append(("Leerlauf", f"{zahl(r['leerlauf_v'], 3)} V (erlaubt {zahl(unten)}–{zahl(oben)} V)"))
     stufen = r.get("stufen") or []
     nenn = [s for s in stufen if abs(s["soll_a"] - strom) < 1e-6]
     if nenn and r.get("leerlauf_v") is not None and not unbekannt:
@@ -319,6 +355,9 @@ def trigger_html(e: dict, r: dict, fach: bool = False) -> str:
 
 
 class NetzteilReiter(QWidget):
+    kennung = "nt"            # Vorsilbe der Ereignisse - so findet das Fenster den richtigen Reiter
+    powerbank = False
+
     def __init__(self, fenster) -> None:
         super().__init__()
         self.f = fenster
@@ -341,6 +380,7 @@ class NetzteilReiter(QWidget):
 
         g = QGroupBox("Typenschild")
         f = QFormLayout(g)
+        self._typ_form, self._links = f, links
         self.vorlage = QComboBox()
         self.vorlage.activated.connect(self._vorlage)
         zeile = QHBoxLayout()
@@ -548,7 +588,8 @@ class NetzteilReiter(QWidget):
         rolle.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         rolle.setWidget(lw)
         # So breit wie der Inhalt braucht - schmaler würde Qt rechts abschneiden
-        rolle.setMinimumWidth(lw.sizeHint().width() + rolle.verticalScrollBar().sizeHint().width() + 8)
+        self._rolle, self._lw = rolle, lw
+        self._breite_anpassen()
         h.addWidget(rolle)
 
         # Strom und Leistung hängen zusammen: wer eins einträgt, bekommt das andere
@@ -568,7 +609,8 @@ class NetzteilReiter(QWidget):
         raster = QGridLayout()
         self.anz = {}
         for i, (k, t) in enumerate([("u", "Spannung"), ("i", "Strom"), ("p", "Leistung"),
-                                    ("t", "Temperatur (Fühler)"), ("r", "Widerstand (Netzteil + Kabel)")]):
+                                    ("t", "Temperatur (Fühler)"), ("r", "Widerstand (Powerbank + Kabel)" if self.powerbank
+                                                                 else "Widerstand (Netzteil + Kabel)")]):
             self.anz[k] = Anzeige(t)
             raster.addWidget(self.anz[k], 0, i)
         self._text_kabel_zu_gross = ("⚠ Kabelwert zu groß – er ist größer als der ganze Spannungsverlust. Bitte "
@@ -736,6 +778,15 @@ class NetzteilReiter(QWidget):
         rechts.setSizes([560, 180])
         h.addWidget(rechts, 1)
 
+    def showEvent(self, ereignis) -> None:
+        super().showEvent(ereignis)
+        # erst jetzt kennt Qt Schrift und Stil - vorher ist die gewünschte Breite zu klein
+        QTimer.singleShot(0, self._breite_anpassen)
+
+    def _breite_anpassen(self) -> None:
+        self._rolle.setMinimumWidth(self._lw.sizeHint().width()
+                                    + self._rolle.verticalScrollBar().sizeHint().width() + 8)
+
     @staticmethod
     def _zahlfeld(lo, hi, stellen, schritt, einheit, null_text=None) -> QDoubleSpinBox:
         w = QDoubleSpinBox()
@@ -767,8 +818,9 @@ class NetzteilReiter(QWidget):
         self.vorlage.clear()
         self.vorlage.addItem("– wählen oder unten selbst eintragen –", None)
         for name, daten in self.f.speicher.vorlagen():
-            self.vorlage.addItem(f"★ {name}", {"eigen": name, **daten})
-        for name, v, a in nt.VORLAGEN:
+            if bool(daten.get("powerbank")) == self.powerbank:
+                self.vorlage.addItem(f"★ {name}", {"eigen": name, **daten})
+        for name, v, a in (nt.PB_VORLAGEN if self.powerbank else nt.VORLAGEN):
             self.vorlage.addItem(nt.vorlage_text(name, v, a), (v, a, name))
         if auswaehlen:
             i = self.vorlage.findText(f"★ {auswaehlen}")
@@ -979,9 +1031,12 @@ class NetzteilReiter(QWidget):
         if e.nenn_v <= 0 or e.strom_a <= 0:
             self.dauer.setText("")
             return
-        s = sum(x.dauer_s for x in nt.plan(e))
+        s = nt.geplant_s(e)
         fehler = e.pruefen()
         text = f"Dauer höchstens etwa {dauer_text(s + 5)}, Strom bis {zahl(e.hoechster_strom())} A"
+        if e.powerbank and e.kapazitaet:
+            text = (f"Dauer etwa {dauer_text(s + 5)} (Kapazitätstest bis leer – aus dem Aufdruck geschätzt), "
+                    f"Strom bis {zahl(e.hoechster_strom())} A")
         self.dauer.setText(f"<span style='color:#d03b3b'>{fehler}</span>" if fehler else text)
 
     # ------------------------------------------------------------------
@@ -1012,7 +1067,9 @@ class NetzteilReiter(QWidget):
             self.steuer_hinweis.setText("Dafür muss die App die Last stellen können: DL24 über das "
                                         "USB-Kabel verbinden (oder ein PX100).")
         elif anderer_test:
-            self.steuer_hinweis.setText("Es läuft gerade ein Akkutest.")
+            self.steuer_hinweis.setText("Es läuft gerade ein anderer Test.")
+        elif self.powerbank:
+            self.steuer_hinweis.setText("Powerbank mit einem USB-Kabel an den Eingang des DL24 anschließen.")
         else:
             self.steuer_hinweis.setText("Netzteil an den Eingang des DL24 anschließen – bei USB über "
                                         "einen USB-Adapter.")
@@ -1070,7 +1127,7 @@ class NetzteilReiter(QWidget):
                                    abschalttest=False, fuehler=False)
         self._kabel_messung = True
         self._kabel_r = 0.0
-        self.ablauf = nt.NetzteilAblauf(e, g, bei_ereignis=lambda a, t: self.f.b.ereignis.emit("nt:" + a, t))
+        self.ablauf = nt.NetzteilAblauf(e, g, bei_ereignis=lambda a, t: self.f.b.ereignis.emit(self.kennung + ":" + a, t))
         self._nenn_v, self._geplant_s = 5.0, sum(x.dauer_s for x in self.ablauf.schritte) + 5
         self.ergebnis.hide()
         self.ergebnis_rahmen.hide()
@@ -1112,7 +1169,7 @@ class NetzteilReiter(QWidget):
             if fehler:
                 QMessageBox.warning(self, "Prüfen", f"{_kurz(e.nenn_v)} V: {fehler}")
                 return
-        melden = lambda a, t: self.f.b.ereignis.emit("nt:" + a, t)
+        melden = lambda a, t: self.f.b.ereignis.emit(self.kennung + ":" + a, t)
         self._kabel_r = self.einstellung().kabel_mohm / 1000
         if self.schnell.isChecked():
             self.ablauf = nt.TriggerAblauf(self.einstellung(), self._trigger_stufen(), g, bei_ereignis=melden)
@@ -1129,12 +1186,14 @@ class NetzteilReiter(QWidget):
         # Zeitachse gleich über die ganze geplante Dauer
         self._nenn_v = self.ablauf.einstellung.nenn_v if isinstance(self.ablauf, nt.NetzteilAblauf) else None
         if isinstance(self.ablauf, nt.NetzteilAblauf):
-            self._geplant_s = sum(x.dauer_s for x in self.ablauf.schritte) + 5
+            self._geplant_s = nt.geplant_s(self.ablauf.einstellung) + 5
             self.bild.setXRange(0, self._geplant_s / 60, padding=0.02)
         else:
             self._geplant_s = None
             self.bild.enableAutoRange(x=True)
-        if not self.schnell.isChecked():
+        if self.powerbank:
+            self.schritt.setText("Powerbank einschalten (Knopf drücken) – warte auf Spannung …")
+        elif not self.schnell.isChecked():
             self.schritt.setText("Leerlaufspannung messen …")
         log.info("Netzteiltest gestartet: %s", plan)
         self.f._zustand_zeigen()
@@ -1391,7 +1450,8 @@ class NetzteilReiter(QWidget):
 
     # ------------------------------------------------------------------
     def verlauf_laden(self) -> None:
-        self._alle = self.f.speicher.netzteil_tests()
+        self._alle = [d for d in self.f.speicher.netzteil_tests()
+                      if bool(d["einstellung"].get("powerbank")) == self.powerbank]
         t = self.tabelle
         t.setRowCount(len(self._alle))
         for i, d in enumerate(self._alle):
@@ -1417,6 +1477,9 @@ class NetzteilReiter(QWidget):
                 grenze = f"bis {zahl(b[0], 1)} W" if b else "–"
                 if haelt is None and r.get("urteil") not in URTEILE:
                     wort, farbe = "ermittelt", None
+            elif ee.get("powerbank") and r.get("energie_wh"):
+                grenze = f"{zahl(r['energie_wh'], 1)} Wh" + (f" ({zahl(r['kap_anteil'], 0)} %)"
+                                                            if r.get("kap_anteil") is not None else "")
             elif r.get("abschalt_a") is not None:
                 grenze = f"{zahl(r['abschalt_a'], 2)} A"
             elif ee.get("abschalttest"):

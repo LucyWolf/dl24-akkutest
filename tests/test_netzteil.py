@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from akkutest import netzteil as nt
 from akkutest.geraet import Geraet
-from akkutest.simulator import SimNetzteil, SimulatorVerbindung
+from akkutest.simulator import SimNetzteil, SimPowerbank, SimulatorVerbindung
 
 
 def durchspielen(quelle, e, tempo=200, frist=60):
@@ -228,6 +228,66 @@ def test_tabelle_wie_urteil():
     assert h.count("⚠ unter 4,75 V") == 1 and h.count("✔") >= 1, h
     assert "1,4 W im Kabel verloren" in h and "15,5 W" in h, h
     assert "im Kabel verloren</td>" in h and "1,44 W (9,3 %)" in h, h      # 3 A: 1,44 W von 15,5 W
+
+
+def pb(**kw):
+    werte = dict(stufen=4, stufe_s=30, dauertest=False, powerbank=True, mindest_a=0.3, fuehler=False)
+    werte.update(kw)
+    return nt.NetzteilEinstellung("PB", 5.0, 2.0, **werte)
+
+
+def test_powerbank_nie_unter_mindeststrom():
+    e = pb()
+    ströme = [s.soll_a for s in nt.plan(e)]
+    assert ströme[0] == 0.3 and ströme[-1] == 2.0 and min(ströme) >= 0.3, ströme
+    # schaltet sich unter 0,25 A nach 20 s ab - mit 0,3 A Mindeststrom passiert das nicht
+    q = SimPowerbank(wh=20, auto_aus_a=0.25, auto_s=20)
+    r = durchspielen(q, e)[0].ergebnis
+    print("Powerbank Stufen:", r.grund, r.urteil, r.energie_wh)
+    assert r.haelt is True and r.abschalt_a is None and r.energie_wh > 0, r.grund
+    assert r.leerlauf_v and 4.9 < r.leerlauf_v < 5.1
+
+
+def test_powerbank_abschaltautomatik():
+    # Mindeststrom zu klein: sie geht in der ersten Stufe aus - das soll klar dastehen
+    q = SimPowerbank(wh=20, auto_aus_a=0.25, auto_s=20)
+    r = durchspielen(q, pb(mindest_a=0.1))[0].ergebnis
+    print("Abschaltautomatik:", r.grund)
+    assert r.abschalt_a == 0.1 and "Abschaltautomatik" in r.grund, r.grund
+
+
+def test_powerbank_kapazitaet():
+    # 2 Wh drin, 15 % Wandlerverlust: es kommen etwa 1,7 Wh heraus
+    q = SimPowerbank(wh=2.0)
+    e = pb(stufentest=False, kapazitaet=True, kap_a=1.0, mah=600)          # 600 mAh × 3,7 V = 2,22 Wh
+    assert nt.plan(e)[-1].art == "kapazitaet" and not any(s.art == "abschalt" for s in nt.plan(e))
+    assert 1000 < nt.geplant_s(e) < 2000
+    ab, _ = durchspielen(q, e, frist=60)
+    r = ab.ergebnis
+    print("Kapazität:", r.grund, r.energie_wh, r.ladung_mah, r.kap_anteil, r.kap_s, r.urteil, r.laien)
+    assert r.kap_leer and not r.autoaus and "leer" in r.grund
+    assert 1.55 < r.energie_wh < 1.8, r.energie_wh
+    assert 300 < r.ladung_mah < 370, r.ladung_mah
+    assert 70 < r.kap_anteil < 81 and r.urteil == "gut", (r.kap_anteil, r.urteil, r.gruende)
+    assert any("normal" in s for s in r.laien) and any("Wattstunden" in s for s in r.laien)
+    # gefälscht: 2000 mAh drauf, 2 Wh drin
+    q = SimPowerbank(wh=2.0)
+    r = durchspielen(q, pb(stufentest=False, kapazitaet=True, kap_a=1.0, mah=2000), frist=60)[0].ergebnis
+    print("Fälschung:", r.kap_anteil, r.urteil)
+    assert r.kap_anteil < 30 and r.urteil == "nicht" and r.verspricht is False
+    assert any("stimmt nicht" in s for s in r.laien)
+
+
+def test_powerbank_wartet_auf_knopf():
+    q = SimPowerbank(wh=20)
+    q.schlaeft = True                         # aus - erst der Knopf schaltet sie ein
+    threading.Timer(0.15, q.knopf).start()        # Zeitraffer: 0,15 s sind 30 s
+    r = durchspielen(q, pb(stufen=2, stufe_s=10))[0].ergebnis
+    assert r.haelt is True and len(r.stufen) == 2, r.grund
+    q = SimPowerbank(wh=20)
+    q.schlaeft = True                         # niemand drückt
+    ab, _ = durchspielen(q, pb(stufen=2, stufe_s=10))
+    assert ab.zustand == "abgebrochen" and "eingeschaltet" in ab.ergebnis.grund, ab.ergebnis.grund
 
 
 def test_zu_hohe_spannung():

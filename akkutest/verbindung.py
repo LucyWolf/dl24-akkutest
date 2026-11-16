@@ -501,9 +501,12 @@ def oeffnen(anschluss: Anschluss) -> Verbindung:
     elif anschluss.art == "ble":
         v = Bluetooth(anschluss.adresse, anschluss.geraet)
     elif anschluss.art == "sim":
-        from .simulator import SimNetzteil, SimulatorVerbindung
+        from .simulator import SimNetzteil, SimPowerbank, SimulatorVerbindung
         art = anschluss.adresse.split(":")[1] if ":" in anschluss.adresse else "px100"
-        if art == "netzteil":
+        if art == "powerbank":
+            # kleine Powerbank 5 V / 2 A mit 2 Wh - im Zeitraffer schnell leer
+            v = SimulatorVerbindung(protokoll="hid", akku=SimPowerbank(wh=2.0))
+        elif art == "netzteil":
             # USB-Ladegerät 5 V / 2 A, das bei 2,6 A abschaltet - über USB-HID wie der echte DL24
             v = SimulatorVerbindung(protokoll="hid", akku=SimNetzteil(5.0, innen_mohm=120, abschalt_a=2.6))
         else:

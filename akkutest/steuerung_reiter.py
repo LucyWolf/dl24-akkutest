@@ -172,8 +172,9 @@ class SteuerungReiter(QWidget):
             # Stop gewinnt immer - auch gegen einen laufenden Test
             if self.f.ablauf and self.f.ablauf.laeuft:
                 self.f.abbrechen(ohne_frage=True)
-            if self.f.nt.laeuft:
-                self.f.nt.abbrechen(ohne_frage=True)
+            r = self.f.pruefung_laeuft
+            if r:
+                r.abbrechen(ohne_frage=True)
             log.info("Hand: Last aus")
             self._befehl("Stop", lambda g: g.last(False))
             return

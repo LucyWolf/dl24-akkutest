@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.36 – 16.11.2026
+
+- **Neuer Reiter „Powerbanks“:** Typenschild mit Kapazität (mAh oder Wh,
+  Zellspannung) und Mindeststrom. Die Last fällt nie unter den Mindeststrom
+  (Standard 0,3 A) – viele Powerbanks schalten sich sonst von selbst ab. Statt
+  einer Leerlaufmessung wird gleich belastet und auf Spannung gewartet
+  („Knopf drücken“). Geht sie beim Mindeststrom aus, steht der Hinweis auf die
+  Abschaltautomatik dabei.
+- **Kapazitätstest:** bis leer entladen, abgegebene Energie in Wh und mAh
+  (auch umgerechnet auf 3,7 V) und der Anteil am Aufdruck – mit Ampel
+  (ab 60 % grün, unter 45 % rot; Einschätzung der App, keine Vorgabe) und
+  Restzeit-Schätzung. Bericht, Diagramme, Vorlagen und Liste wie beim Netzteil.
+- **Simulator „Powerbank 5 V / 2 A (2 Wh)“** zum Ausprobieren ohne Gerät.
+- Linke Spalte wird nach dem Anzeigen richtig breit (schnitt vorher Felder ab).
+
 ## 1.0.35 – 16.11.2026
 
 - **Diagramme bleiben im Bild:** Verschieben und Zoomen mit der Maus ist
