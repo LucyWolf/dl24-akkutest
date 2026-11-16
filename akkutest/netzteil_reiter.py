@@ -279,6 +279,8 @@ class NetzteilReiter(QWidget):
         self._marken: list = []
         self._marken_unten: list = []
         self._geplant_s: float | None = None
+        self._teil_ab = 0                  # Schnellladen: ab diesem Punkt gehört die Kurve zur aktuellen Spannung
+        self._teil_gezeigt = None
         self._nenn_v: float | None = None
         self._bauen()
         self._vorlage(0)
@@ -856,6 +858,7 @@ class NetzteilReiter(QWidget):
         self.ergebnis.hide()
         self.ergebnis_rahmen.hide()
         self._grenzen_zeigen(None)
+        self._teil_ab, self._teil_gezeigt = 0, None
         self._kurven([])
         self._marken_zeichnen([], neu=True)
         self.bild.setXRange(0, self._geplant_s / 60, padding=0.02)
@@ -900,6 +903,7 @@ class NetzteilReiter(QWidget):
             self._grenzen_zeigen(e)
         self.ergebnis.hide()
         self.ergebnis_rahmen.hide()
+        self._teil_ab, self._teil_gezeigt = 0, None
         self._kurven([])
         self._marken_zeichnen([], neu=True)
         # Zeitachse gleich über die ganze geplante Dauer
@@ -977,6 +981,10 @@ class NetzteilReiter(QWidget):
         # Spannungsachse nach dem Betrieb, nicht nach dem Einbruch auf 0 beim Abschalten -
         # sonst werden die Stufen platt
         if self._nenn_v and v:
+            # bei Schnellladen nur die aktuelle Spannung - sonst reicht die Achse von 5 bis 20 V
+            if self._teil_ab and len(punkte) > self._teil_ab:
+                v = [p[1] + p[2] * self._kabel_ohm for p in punkte[self._teil_ab:]] + \
+                    [p[1] for p in punkte[self._teil_ab:]]
             gut = [u for u in v if u >= self._nenn_v * nt.ZUSAMMENBRUCH] or v
             lo, hi = min(gut), max(gut)
             if self.grenze.isVisible():
@@ -1037,6 +1045,12 @@ class NetzteilReiter(QWidget):
             self.anz["t"].setzen(zahl(m.temp_fuehler, 1, "°C") if m.temp_fuehler is not None else "kein Fühler")
         ab = self.ablauf
         teil = ab.teil if isinstance(ab, nt.TriggerAblauf) else ab
+        if isinstance(ab, nt.TriggerAblauf) and teil is not None and teil is not self._teil_gezeigt:
+            # neue Spannung am Adapter: Ampel und Achse für diese Spannung
+            self._teil_gezeigt = teil
+            self._teil_ab = len(ab.punkte)
+            self._nenn_v = teil.einstellung.nenn_v
+            self._grenzen_zeigen(teil.einstellung)
         if ab and ab.laeuft and isinstance(teil, nt.NetzteilAblauf):
             rest = teil.restzeit(m.zeit)
             if rest:

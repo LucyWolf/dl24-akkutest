@@ -387,6 +387,9 @@ def test_schnellladen_im_fenster():
     assert warten(lambda: "jetzt 9 V" in f.nt.schritt.text(), 30), f.nt.schritt.text()
     foto(f, "10-trigger-umschalten")
     quelle.nenn_v = 9.0                      # Mensch drückt am Adapter
+    assert warten(lambda: f.nt._nenn_v == 9.0 and f.nt.baender[2].isVisible(), 30)    # Ampel für 9 V
+    lo, hi = f.nt.baender[2].getRegion()
+    assert abs(lo - 8.55) < 0.01 and abs(hi - 9.45) < 0.01, (lo, hi)
     assert warten(lambda: "jetzt 15 V" in f.nt.schritt.text(), 60), f.nt.schritt.text()
     f.nt.knopf_weiter.click()                # 15 V gibt es nicht
     assert warten(lambda: not f.nt.laeuft and f.nt.ergebnis.isVisible(), 30), f.nt.ablauf.zustand

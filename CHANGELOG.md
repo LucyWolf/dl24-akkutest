@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.27 – 16.11.2026
+
+- **Schnellladen:** Die Ampel im Diagramm erscheint jetzt auch hier – für die
+  Spannung, die gerade am Trigger-Adapter anliegt (5 V, 9 V, …). Die
+  Spannungsachse richtet sich nach der aktuellen Spannung statt von 5 bis 20 V
+  zu reichen.
+
 ## 1.0.26 – 16.11.2026
 
 - Die Anzeige oben zeigt nur noch die **gemessene** Spannung – die berechnete
