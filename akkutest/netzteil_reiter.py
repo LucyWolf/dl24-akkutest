@@ -742,7 +742,7 @@ class NetzteilReiter(QWidget):
         # Spannung · Strom und Leistung · Temperatur (nur mit Fühler)
         self.flaeche = pg.GraphicsLayoutWidget()
         self.flaeche.setBackground(None)
-        self.flaeche.setMinimumHeight(260)
+        self.flaeche.setMinimumHeight(200)
         self.bild = self.flaeche.addPlot(row=0, col=0)
         self.bild.setLabel("left", "Spannung (V)")
         self.legende = self.bild.addLegend(offset=(-10, 10))
@@ -842,7 +842,7 @@ class NetzteilReiter(QWidget):
         self.ergebnis_rahmen.setWidgetResizable(True)
         self.ergebnis_rahmen.setFrameShape(QFrame.NoFrame)
         self.ergebnis_rahmen.setWidget(self.ergebnis)
-        self.ergebnis_rahmen.setMinimumHeight(90)
+        self.ergebnis_rahmen.setMinimumHeight(60)
         self.ergebnis_rahmen.hide()
         self.ergebnis.hide()
         self.teiler.addWidget(self.ergebnis_rahmen)
@@ -1470,7 +1470,7 @@ class NetzteilReiter(QWidget):
                 b.setLabel("bottom", "")
                 b.hideAxis("bottom")
         self.box_k.setVisible(kabel)
-        self.flaeche.setMinimumHeight(260 + 60 * kabel + 60 * temp)
+        self.flaeche.setMinimumHeight(200 + 40 * kabel + 40 * temp)
         # die zweite Skala sitzt erst richtig, wenn der Streifen Platz bekommen hat
         QTimer.singleShot(0, lambda: self.box_k.setGeometry(self.bild_k.vb.sceneBoundingRect()))
         self._mit_kabel, self._mit_temp = kabel, temp

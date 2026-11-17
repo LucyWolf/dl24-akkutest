@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.51 – 17.11.2026
+
+- **Vorlage TZT/CKCS PD65W:** 15 V jetzt mit 3 A statt „ermitteln“ –
+  gemessen hielt das Modul bis 3,75 A die Spannung; mehr als 3 A erlaubt ein
+  normales USB-C-Kabel nicht.
+- Diagramm und Ergebnis brauchen weniger Mindesthöhe – in kleinen Fenstern
+  überlappten sie trotz Teiler noch.
+
 ## 1.0.50 – 17.11.2026
 
 - **Diagramm und Ergebnis überlappen nicht mehr:** Mit Kabelverlust- und

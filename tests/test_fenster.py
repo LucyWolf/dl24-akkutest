@@ -239,7 +239,7 @@ def test_netzteil_reiter():
     f.nt._vorlage()
     assert f.nt.schnell.isChecked()
     assert [(v, h.isChecked(), a.value()) for v, h, a in f.nt.trigger] == [
-        (5.0, True, 3.0), (9.0, True, 3.0), (12.0, True, 3.0), (15.0, True, 0), (20.0, True, 3.25), (28.0, False, 0)]
+        (5.0, True, 3.0), (9.0, True, 3.0), (12.0, True, 3.0), (15.0, True, 3.0), (20.0, True, 3.25), (28.0, False, 0)]
     f.nt.schnell.setChecked(False)
     f.nt.vorlage.setCurrentIndex(f.nt.vorlage.findText("USB-Ladegerät 10 W", flags=fenster.Qt.MatchStartsWith))
     f.nt._vorlage()
