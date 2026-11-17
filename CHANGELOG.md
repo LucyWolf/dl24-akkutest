@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.55 – 17.11.2026
+
+- **Kabeltest über alle Spannungen:** Mit „Alle Spannungen über den
+  Trigger-Adapter“ misst die Referenz und danach das Kabel bei jeder
+  gewählten Spannung (5–28 V) bis zum Prüfstrom; das Ergebnis zeigt den
+  Kabelwiderstand je Spannung und den Mittelwert.
+- **Temperatur im Kabeltest:** Fühler standardmäßig an und gemerkt, höchste
+  Temperatur am Stecker je Spannung in der Tabelle, „aus ⚠“, wenn der Fühler
+  steckt, aber abgewählt ist.
+
 ## 1.0.54 – 17.11.2026
 
 - **Update-Leiste im dunklen Design lesbar:** „Jetzt aktualisieren“ und

@@ -44,7 +44,7 @@ def auswerten(ref_mohm: float | None, gesamt_mohm: float, typ: str, temp_start: 
     name, grenze, typ_a, budget_v = nt.KABEL_TYPEN.get(typ, ("unbekannt", 0.0, nenn_a or 3.0, 0.75))
     nenn = nenn_a or typ_a
     r = kabel / 1000
-    tabelle = [(a, a * r, a * a * r) for a in (1.0, 2.0, 3.0, 5.0) if a <= max(nenn, 3.0) + 1e-9]
+    tabelle = [(a, a * r, a * a * r) for a in (1.0, 2.0, 3.0, 4.0, 5.0) if a <= max(nenn, 3.0) + 1e-9]
     bewertung = nt.kabel_bewerten(kabel, typ) if typ in nt.KABEL_TYPEN else None
     return {
         "kabel_mohm": round(kabel, 0), "ref_mohm": ref_mohm, "gesamt_mohm": gesamt_mohm, "typ": typ,
@@ -88,6 +88,17 @@ def bericht_html(d: dict) -> str:
         tab.append(("Temperatur am Stecker", t))
     z.append("<table cellspacing=4>" + "".join(f"<tr><td style='color:gray'>{a}</td><td>{b}</td></tr>"
                                                  for a, b in tab) + "</table>")
+    if d.get("je_spannung"):
+        z.append("<p><b>Je Spannung</b> (über den Trigger-Adapter)</p><table cellspacing=6><tr>"
+                 "<td style='color:gray'>Spannung</td><td style='color:gray'>ohne Kabel</td>"
+                 "<td style='color:gray'>mit Kabel</td><td style='color:gray'>Kabel</td>"
+                 "<td style='color:gray'>bis</td><td style='color:gray'>Stecker max.</td></tr>" + "".join(
+                     f"<tr><td><b>{zahl(x[0], 0)} V</b></td><td>{zahl(x[1], 0) if x[1] is not None else '–'} mΩ</td>"
+                     f"<td>{zahl(x[2], 0)} mΩ</td><td><b>{zahl(x[3], 0)} mΩ</b></td><td>{zahl(x[4], 2)} A</td>"
+                     f"<td>{zahl(x[5], 1, '°C') if len(x) > 5 and x[5] is not None else '–'}</td></tr>"
+                     for x in d["je_spannung"]) + "</table>")
+        if d.get("fehlt"):
+            z.append(f"<p style='color:#c77700'>Nicht geprüft: {html.escape(', '.join(d['fehlt']))}</p>")
     z.append("<p><b>Was das Kabel kostet</b></p><table cellspacing=6><tr><td style='color:gray'>Strom</td>"
              "<td style='color:gray'>Spannungsabfall</td><td style='color:gray'>Verlust</td>"
              "<td style='color:gray'>bei 5 V</td></tr>" + "".join(
@@ -139,6 +150,24 @@ class KabelReiter(QWidget):
         self.mit_ref.setToolTip("Zuerst das Netzteil über einen kurzen Adapter direkt am DL24 - dann wird sein "
                                 "eigener Widerstand vom Ergebnis abgezogen.")
         f.addRow(self.mit_ref)
+        self.alle_v = QCheckBox("Alle Spannungen über den Trigger-Adapter prüfen:")
+        self.alle_v.setToolTip("Referenz und Kabel werden bei jeder gewählten Spannung gemessen – die App sagt, "
+                               "wann am Trigger-Adapter umgeschaltet wird.")
+        f.addRow(self.alle_v)
+        zeile = QHBoxLayout()
+        self.spannungen = []
+        for v in nt.TRIGGER_SPANNUNGEN:
+            haken = QCheckBox(f"{v:g} V")
+            haken.setChecked(v <= 20)
+            if v > 20.5:
+                haken.setToolTip("28 V nur mit EPR: Netzteil, Trigger-Adapter und ein 5-A-/240-W-Kabel")
+            zeile.addWidget(haken)
+            self.spannungen.append((v, haken))
+        zeile.addStretch(1)
+        f.addRow(zeile)
+        self.alle_v.toggled.connect(lambda an: [hk.setEnabled(an) for _, hk in self.spannungen])
+        for _, hk in self.spannungen:
+            hk.setEnabled(False)
         self.mit_dauer = QCheckBox("Dauertest beim Prüfstrom, Minuten:")
         self.dauer_min = QSpinBox()
         self.dauer_min.setRange(1, 120)
@@ -156,6 +185,13 @@ class KabelReiter(QWidget):
         zeile.addWidget(self.mit_fuehler)
         zeile.addWidget(self.temp_grenze)
         f.addRow(zeile)
+        # Wärme am Stecker ist beim Kabel das Wichtigste - Fühler standardmäßig an, Einstellung gemerkt
+        from PySide6.QtCore import QSettings
+        self._einst = QSettings("dl24-akkutest", "dl24-akkutest")
+        self.mit_fuehler.setChecked(str(self._einst.value("kt/fuehler", "true")).lower() == "true")
+        self.temp_grenze.setValue(int(float(self._einst.value("kt/temp_grenze", 50) or 50)))
+        self.mit_fuehler.toggled.connect(lambda an: self._einst.setValue("kt/fuehler", an))
+        self.temp_grenze.valueChanged.connect(lambda w: self._einst.setValue("kt/temp_grenze", w))
         hinweis = QLabel("Ein gutes 5-V-Netzteil verwenden, das den Prüfstrom liefert (für 5 A ein Netzteil "
                          "und Adapter, die 5 A können). Den Fühler mit Klebeband an den Stecker kleben – dort "
                          "wird ein schlechtes Kabel zuerst warm.")
@@ -269,8 +305,10 @@ class KabelReiter(QWidget):
         self.knopf_start.setEnabled(self._steuer_ok and frei)
         self.knopf_abbruch.setEnabled(not frei)
         for w in (self.name, self.typ, self.strom, self.mit_ref, self.mit_dauer, self.dauer_min,
-                  self.mit_fuehler, self.temp_grenze):
+                  self.mit_fuehler, self.temp_grenze, self.alle_v):
             w.setEnabled(frei)
+        for _, hk in self.spannungen:
+            hk.setEnabled(frei and self.alle_v.isChecked())
 
     def _einstellung(self, ref: bool) -> nt.NetzteilEinstellung:
         a = round(self.strom.value(), 2)
@@ -282,9 +320,18 @@ class KabelReiter(QWidget):
                                       dauer_min=self.dauer_min.value(), abschalttest=False,
                                       fuehler=self.mit_fuehler.isChecked(), temp_grenze=self.temp_grenze.value())
 
+    def _volt(self) -> list[float]:
+        return [v for v, h in self.spannungen if h.isChecked()] if self.alle_v.isChecked() else []
+
     def _lauf(self, e: nt.NetzteilEinstellung) -> None:
-        self.ablauf = nt.NetzteilAblauf(e, self.f.geraet,
-                                        bei_ereignis=lambda a, t: self.f.b.ereignis.emit(self.kennung + ":" + a, t))
+        melden = lambda a, t: self.f.b.ereignis.emit(self.kennung + ":" + a, t)
+        volt = self._volt()
+        if volt:
+            # jede Spannung bis zum Prüfstrom - höchstens so viel, wie der DL24 an Leistung schafft
+            stufen = [(v, round(min(e.nenn_a, nt.DL24_MAX_W / v * 0.98), 2)) for v in volt]
+            self.ablauf = nt.TriggerAblauf(e, stufen, self.f.geraet, bei_ereignis=melden)
+        else:
+            self.ablauf = nt.NetzteilAblauf(e, self.f.geraet, bei_ereignis=melden)
         self.linie.setData([], [])
         self.linie_t.setData([], [])
         self.f._zustand_zeigen()
@@ -292,6 +339,9 @@ class KabelReiter(QWidget):
     def starten(self) -> None:
         g = self.f.geraet
         if not g or not g.kann_steuern:
+            return
+        if self.alle_v.isChecked() and not self._volt():
+            QMessageBox.information(self, "Kabel prüfen", "Bitte mindestens eine Spannung wählen.")
             return
         self.ergebnis.hide()
         self._ref = None
@@ -336,14 +386,24 @@ class KabelReiter(QWidget):
     def messwert(self, m: Messwert) -> None:
         self.anz["u"].setzen(zahl(m.spannung, 3, "V"))
         self.anz["i"].setzen(zahl(m.strom, 3, "A"))
-        self.anz["t"].setzen(zahl(m.temp_fuehler, 1, "°C") if m.temp_fuehler is not None else "–")
+        if not self.mit_fuehler.isChecked():
+            self.anz["t"].setzen("aus ⚠" if m.temp_fuehler is not None else "aus")
+            self.anz["t"].setToolTip("Der Fühler steckt, wird aber nicht ausgewertet – Haken „Temperaturfühler am "
+                                     "Stecker“ setzen." if m.temp_fuehler is not None else "")
+        else:
+            self.anz["t"].setzen(zahl(m.temp_fuehler, 1, "°C") if m.temp_fuehler is not None else "kein Fühler")
         ab = self.ablauf
         if not ab or not ab.punkte:
             return
-        if ab.laeuft and len(ab.ergebnis.stufen) >= 2:
-            w = nt.widerstand(ab.ergebnis.stufen)
+        teil = ab.teil if isinstance(ab, nt.TriggerAblauf) else ab
+        stufen = teil.ergebnis.stufen if isinstance(teil, nt.NetzteilAblauf) else []
+        if ab.laeuft and len(stufen) >= 2:
+            w = nt.widerstand(stufen)
             if w is not None:
-                kabel = w - (self._ref or 0) if self.phase == "kabel" else w
+                ref = self._ref
+                if isinstance(ref, dict):
+                    ref = ref.get(teil.einstellung.nenn_v, 0)
+                kabel = w - (ref or 0) if self.phase == "kabel" else w
                 self.anz["r"].setzen(f"{max(0, kabel):.0f} mΩ" + (" (Netzteil)" if self.phase == "ref" else ""))
         p = list(ab.punkte)
         self.linie.setData([x[0] / 60 for x in p], [x[1] for x in p])
@@ -352,6 +412,12 @@ class KabelReiter(QWidget):
         self.bild_t.setVisible(bool(mit))
 
     def ereignis(self, art: str, text: str) -> None:
+        if art == "umschalten":
+            from PySide6.QtWidgets import QApplication
+            self.schritt.setText(("Referenz: " if self.phase == "ref" else "Mit Kabel: ") + text)
+            QApplication.beep()
+            QApplication.alert(self.f)
+            return
         if art in ("schritt", "info"):
             vorn = "Schritt 1 von 2 (Referenz): " if self.phase == "ref" else (
                 "Schritt 2 von 2 (mit Kabel): " if self._ref is not None else "Mit Kabel: ")
@@ -361,6 +427,9 @@ class KabelReiter(QWidget):
 
     def _fertig(self) -> None:
         ab = self.ablauf
+        if isinstance(ab, nt.TriggerAblauf):
+            self._fertig_spannungen(ab)
+            return
         r = ab.ergebnis
         if ab.zustand != "fertig" and not (self.phase == "kabel" and r.zu_heiss and r.widerstand_mohm):
             self.schritt.setText(f"Nicht geklappt: {r.grund}")
@@ -391,6 +460,57 @@ class KabelReiter(QWidget):
         self._zeigen(d)
         self._speichern(d)
         self.schritt.setText(f"Fertig: Kabel {d['kabel_mohm']:.0f} mΩ")
+        self.f._zustand_zeigen()
+
+    def _fertig_spannungen(self, ab: nt.TriggerAblauf) -> None:
+        """Über den Trigger-Adapter: je Spannung ein Widerstand."""
+        werte = {t["einstellung"]["nenn_v"]: t["ergebnis"].get("widerstand_mohm") for t in ab.ergebnis.teile}
+        werte = {v: w for v, w in werte.items() if w is not None}
+        if not werte:
+            self.schritt.setText(f"Nicht geklappt: {ab.ergebnis.grund}")
+            self.f._zustand_zeigen()
+            return
+        if self.phase == "ref":
+            self._ref = werte
+            self.schritt.setText("Referenz fertig (" + ", ".join(f"{v:g} V: {w:.0f} mΩ" for v, w in werte.items())
+                                 + "). Jetzt das Kabel zwischen Netzteil und DL24 stecken (gleicher Adapter), den "
+                                   f"Trigger-Adapter wieder auf {min(werte):g} V stellen und auf „weiter“ drücken.")
+            self.knopf_start.hide()
+            self.knopf_weiter.show()
+            from PySide6.QtWidgets import QApplication
+            QApplication.beep()
+            self.f._zustand_zeigen()
+            return
+        ref = self._ref if isinstance(self._ref, dict) else {}
+        je, fehlt = [], [f"{n['volt']:g} V ({n['grund']})" for n in ab.ergebnis.nicht]
+        for t in ab.ergebnis.teile:
+            v = t["einstellung"]["nenn_v"]
+            ges = t["ergebnis"].get("widerstand_mohm")
+            if ges is None:
+                continue
+            r0 = ref.get(v) if ref else None
+            if ref and r0 is None:
+                fehlt.append(f"{v:g} V (keine Referenz)")
+                continue
+            je.append((v, r0, ges, max(0.0, ges - (r0 or 0)), t["ergebnis"].get("max_getestet_a", 0),
+                       t["ergebnis"].get("temp_max")))
+        if not je:
+            self.schritt.setText("Kein Wert – keine Spannung mit Referenz und Kabel gemessen.")
+            self.f._zustand_zeigen()
+            return
+        kabel = sum(x[3] for x in je) / len(je)
+        temps = [t["ergebnis"].get("temp_max") for t in ab.ergebnis.teile if t["ergebnis"].get("temp_max")]
+        starts = [t["ergebnis"].get("temp_start") for t in ab.ergebnis.teile if t["ergebnis"].get("temp_start")]
+        d = auswerten(None if not ref else 0.0, kabel, self.typ.currentData(), min(starts) if starts else None,
+                      max(temps) if temps else None)
+        d["ohne_referenz"] = not ref
+        d["gesamt_mohm"] = sum(x[2] for x in je) / len(je)
+        d["ref_mohm"] = d["gesamt_mohm"] - kabel
+        d.update(name=self.name.text().strip(), wann=time.time(), je_spannung=je, fehlt=fehlt,
+                 pruef_a=self.strom.value(), kurve=[list(p) for p in nt.duennen(ab.punkte, 900)])
+        self._zeigen(d)
+        self._speichern(d)
+        self.schritt.setText(f"Fertig: Kabel {d['kabel_mohm']:.0f} mΩ (Mittel über {len(je)} Spannungen)")
         self.f._zustand_zeigen()
 
     # ------------------------------------------------------------------

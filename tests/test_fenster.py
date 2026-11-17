@@ -542,6 +542,43 @@ def test_kabeltester():
     assert f.nt.kabel_name.text() == "Testkabel"
     pdf = Path(os.environ["AKKUTEST_DATEN"]) / "kabel.pdf"
     assert kt.bericht_speichern(str(pdf)) == str(pdf) and pdf.stat().st_size > 5000
+    # über den Trigger-Adapter: Referenz bei 5 und 9 V, dann mit Kabel bei 5 und 9 V
+    from akkutest import netzteil as nt_mod
+    nt_mod.TRIGGER_WARTEN_S = 30
+    quelle = f.geraet.v.geraet.akku
+    quelle.innen -= 0.100                          # Kabel wieder weg
+    kt.alle_v.setChecked(True)
+    for v, h in kt.spannungen:
+        h.setChecked(v in (5.0, 9.0))
+    kt.strom.setValue(2.0)
+    import threading as th, time as tm
+    halt = th.Event()
+
+    def adapter():                                 # der Mensch am Trigger-Adapter
+        while not halt.is_set():
+            text = kt.schritt.text()
+            for v in (5.0, 9.0):
+                if f"jetzt {v:g} V" in text:
+                    quelle.nenn_v = v
+            if "auf 5 V stellen" in text:
+                quelle.nenn_v = 5.0
+            tm.sleep(0.02)
+    th.Thread(target=adapter, daemon=True).start()
+    quelle.nenn_v = 5.0
+    kt.starten()
+    assert warten(lambda: kt.knopf_weiter.isVisible(), 90), kt.schritt.text()
+    assert isinstance(kt._ref, dict) and set(kt._ref) == {5.0, 9.0}, kt._ref
+    quelle.innen += 0.080
+    quelle.nenn_v = 5.0
+    kt.knopf_weiter.click()
+    assert warten(lambda: not kt.laeuft and "Mittel über" in kt.schritt.text(), 120), kt.schritt.text()
+    halt.set()
+    d = kt._letztes
+    print("Kabel je Spannung:", d["je_spannung"], d["kabel_mohm"])
+    assert [x[0] for x in d["je_spannung"]] == [5.0, 9.0] and 60 <= d["kabel_mohm"] <= 100, d
+    assert all(x[5] is not None for x in d["je_spannung"]) and "Stecker max." in kt.ergebnis.text()
+    assert "Je Spannung" in kt.ergebnis.text() and "9 V" in kt.ergebnis.text()
+    quelle.innen -= 0.080
     f.nt.kabel.setValue(0)
     f.pb.kabel.setValue(0)
     f.trennen()
