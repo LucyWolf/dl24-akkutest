@@ -56,6 +56,32 @@ def gesetz() -> dict:
     }
 
 
+TYPEC_URL = "https://www.usb.org/euconformity"
+COMPLIANCE_URL = ("https://www.usb.org/sites/default/files/"
+                  "USB%20Type-C_Compliance%20Document_Rev_2_1b_June_2021.pdf")
+
+
+def kabel_eintraege() -> list[dict]:
+    """Woher die Grenzen im Kabeltest stammen."""
+    return [
+        {"titel": "Widerstand und Spannungsabfall",
+         "norm": "USB Type-C Cable and Connector Specification, Abschnitt 4.4.1 – in Europa als EN IEC 62680-1-3 "
+                 "(Download über die EU-Konformitätsseite des USB-IF)",
+         "werte": "höchstens 500 mV Abfall auf VBUS und 250 mV auf GND beim Nennstrom des Kabels – zusammen 750 mV. "
+                  "Daraus: 3-A-Kabel höchstens 250 mΩ, 5-A-Kabel höchstens 150 mΩ (Hin- und Rückleitung). "
+                  "USB 2.0: 125 mV je Leitung bei 500 mA (USB 2.0 §7.2.2).",
+         "url": TYPEC_URL},
+        {"titel": "Prüfverfahren: Spannungsabfall und Erwärmung",
+         "norm": "USB Type-C Compliance Document (USB-IF), Prüfung B-1-5 (Spannungsabfall) und B-6-1 "
+                 "(Erwärmung, nach EIA-364-70)",
+         "werte": "Beim Nennstrom des Kabels: Spannungsabfall wie oben; Erwärmung außen am Steckergehäuse über den "
+                  "VBUS-/GND-Kontakten höchstens 30 °C über der Raumtemperatur (25 °C, ruhige Luft), gemessen, "
+                  "wenn die Temperatur stabil ist.",
+         "url": COMPLIANCE_URL},
+        gesetz(),
+    ]
+
+
 def eintraege(spannungen: list[float]) -> list[dict]:
     """Je geprüfter Spannungsart ein Eintrag (5 V, jede PD-Spannung), dazu der gesetzliche Bezug."""
     aus, gesehen = [], set()

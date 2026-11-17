@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.64 – 18.11.2026
+
+- **Kabelbericht widerspricht sich nicht mehr:** Ist die Erwärmung über
+  +30 K, steht oben rot „Nicht in Ordnung: zu warm“ statt grün „In Ordnung“;
+  „Taugt bis“ zeigt dann den kritischen Strom. In der Liste „✘ zu warm“.
+- **Angabe nachträglich ändern:** Falsche Wattzahl gewählt? Beim angezeigten
+  Ergebnis neu wählen – die App fragt nach und bewertet ohne neue Messung neu.
+- **Normen mit QR-Code im Kabelbericht:** Widerstand/Spannungsabfall (USB
+  Type-C Cable and Connector Specification §4.4.1, EN IEC 62680-1-3),
+  Prüfverfahren B-1-5/B-6-1 (USB Type-C Compliance Document), gesetzlicher
+  Bezug.
+- Klarere Texte zur Referenz (eine hohe Referenz liegt meist am Netzteil und
+  wird abgezogen) und Erwärmung überall mit einer Nachkommastelle.
+
 ## 1.0.63 – 17.11.2026
 
 - **Kabeltest: Netzteil aus einer Liste wählen** – eigene Netzteil-Vorlagen,

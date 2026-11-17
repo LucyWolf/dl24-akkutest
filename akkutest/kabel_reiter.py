@@ -101,6 +101,12 @@ ANGABEN = {60: (3.0, 20.0, "usbc3"), 100: (5.0, 20.0, "usbc5"), 140: (5.0, 28.0,
            240: (5.0, 48.0, "usbc5")}
 
 
+def zu_warm(d: dict) -> bool:
+    """Erwärmung über der Grenze der Norm."""
+    k = d.get("erwaermung_k")
+    return k is not None and k > ERWAERMUNG_MAX_K
+
+
 def angabe_pruefen(d: dict) -> tuple[str, list[tuple[str, str, str]]] | None:
     """Hält das Kabel die Angabe? (Gesamt, [(Zeichen, Punkt, Begründung)]) - Zeichen ✔ ✘ ?"""
     w = d.get("angabe_w")
@@ -179,7 +185,14 @@ def bericht_html(d: dict) -> str:
          f"Uhr · Typ: {html.escape(d.get('typ_name', ''))}"
          + (f" · Angabe: {d['angabe_w']} W" if d.get("angabe_w") else "") + "</p>"]
     z.append(angabe_html(d))
-    if d.get("ampel"):
+    if zu_warm(d):
+        # die Wärme entscheidet - ein guter Widerstand allein macht das Kabel nicht in Ordnung
+        z.append(f"<p style='font-size:17px; color:{AMPEL['rot']}'><b>Nicht in Ordnung: zu warm "
+                 f"(+{zahl(d['erwaermung_k'], 1)} K, erlaubt +{zahl(ERWAERMUNG_MAX_K, 0)} K) – der Widerstand selbst "
+                 f"ist in Ordnung ({zahl(d['kabel_mohm'], 0)} mΩ)</b></p>" if d.get("ampel") == "gruen" else
+                 f"<p style='font-size:17px; color:{AMPEL['rot']}'><b>Nicht in Ordnung: zu warm "
+                 f"(+{zahl(d['erwaermung_k'], 1)} K) und {html.escape(d['satz'])}</b></p>")
+    elif d.get("ampel"):
         z.append(f"<p style='font-size:17px; color:{AMPEL[d['ampel']]}'><b>{html.escape(d['satz'])}</b></p>")
     else:
         z.append(f"<p>{html.escape(d['satz'])}</p>")
@@ -196,19 +209,25 @@ def bericht_html(d: dict) -> str:
         if d.get("ref_name"):
             tab.append(("Gemessen", f"{zahl(d['gesamt_mohm'], 0)} mΩ mit Kabel − {zahl(d['ref_mohm'], 0)} mΩ Referenz "
                                     f"(Netzteil + Referenzkabel „{html.escape(d['ref_name'])}“)<br><span "
-                                    "style='color:gray'>Das Ergebnis ist um den Widerstand des Referenzkabels zu klein "
-                                    "(bei einem kurzen, guten Kabel etwa 20–40 mΩ).</span>"))
+                                    "style='color:gray'>Das Referenzkabel steckt in der Referenz mit drin – deshalb ist "
+                                    "das Ergebnis um seinen Widerstand zu klein (bei einem kurzen, guten Kabel etwa "
+                                    "20–40 mΩ).</span>"))
         else:
             tab.append(("Gemessen", f"{zahl(d['gesamt_mohm'], 0)} mΩ mit Kabel − {zahl(d['ref_mohm'], 0)} mΩ ohne "
                                     "Kabel (Referenz)"))
         if (d.get("ref_mohm") or 0) > REF_GUT_MOHM:
-            tab.append(("", f"<span style='color:#c77700'>⚠ Referenz über {REF_GUT_MOHM:.0f} mΩ – das Referenzkabel "
-                            "oder das Netzteil taugt wohl kaum als Referenz; das Kabel ist eher schlechter als "
-                            "angegeben.</span>"))
+            tab.append(("", f"<span style='color:#c77700'>Die Referenz ist mit {zahl(d['ref_mohm'], 0)} mΩ recht hoch. "
+                            "Meist liegt das am Netzteil (z. B. einem Step-Down-Modul) – das wird abgezogen und "
+                            "verfälscht das Ergebnis nicht. Nur wenn das Referenzkabel selbst schlecht ist, fällt das "
+                            f"Ergebnis zu gut aus: Das geprüfte Kabel hätte dann mehr als "
+                            f"{zahl(d['kabel_mohm'], 0)} mΩ.</span>"))
     if d.get("grenze_mohm"):
         tab.append(("Erlaubt", f"höchstens {zahl(d['grenze_mohm'], 0)} mΩ für {html.escape(d['typ_name'])} "
                                "(USB Type-C §4.4.1 bzw. USB 2.0 §7.2.2)"))
-    if d.get("bis_a"):
+    if d.get("bis_a") and zu_warm(d) and kritisch(d):
+        tab.append(("Taugt bis", f"etwa {zahl(kritisch(d)[0], 1)} A – darüber wird es zu warm "
+                                 "(siehe „Kritisch ab“)"))
+    elif d.get("bis_a"):
         if d["bis_a"] >= d["nenn_a"]:
             tab.append(("Taugt bis", f"{zahl(d['nenn_a'], 0)} A – mehr ist für {html.escape(d['typ_name'])} nicht "
                                      f"vorgesehen (vom Widerstand her ginge es bis {zahl(min(d['bis_a'], 99), 1)} A)"))
@@ -218,7 +237,7 @@ def bericht_html(d: dict) -> str:
     if d.get("temp_max") is not None:
         t = f"höchstens {zahl(d['temp_max'], 1)} °C"
         if d.get("temp_start") is not None:
-            t += f" (Start {zahl(d['temp_start'], 1)} °C, +{d['temp_max'] - d['temp_start']:.0f} K)"
+            t += f" (Start {zahl(d['temp_start'], 1)} °C, +{zahl(d['temp_max'] - d['temp_start'], 1)} K)"
         tab.append(("Temperatur am Stecker", t))
         k = d.get("erwaermung_k")
         if k is not None:
@@ -576,6 +595,26 @@ class KabelReiter(QWidget):
 
     def _angabe_gewaehlt(self, *_) -> None:
         w = self.angabe.currentData()
+        d = self._letztes
+        if d and not self.laeuft and self.ergebnis.isVisible() and d.get("angabe_w", 0) != (w or 0) and \
+                self.f._frage("Angabe ändern", f"Die Angabe auch für das angezeigte Ergebnis "
+                                               f"„{d.get('name') or 'ohne Namen'}“ ändern?\n\n"
+                                               "Ja: Das Ergebnis wird neu bewertet (ohne neue Messung).\n"
+                                               "Nein: gilt nur für die nächste Prüfung."):
+            # falsch eingestellt? Angabe nachträglich ändern - neu bewerten, ohne neu zu messen
+            typ = ANGABEN[w][2] if w in ANGABEN else d.get("typ")
+            neu = auswerten(0.0, d["kabel_mohm"], typ, d.get("temp_start"), d.get("temp_max"))
+            for k in ("typ", "typ_name", "grenze_mohm", "nenn_a", "bis_a", "tabelle", "ampel", "satz"):
+                d[k] = neu[k]
+            d["angabe_w"] = w or 0
+            self._zeigen(d)
+            liste = self._liste()
+            for x in liste:
+                if x.get("wann") == d.get("wann"):
+                    x.update(d)
+            self._datei().write_text(json.dumps(liste, ensure_ascii=False), encoding="utf-8")
+            self.liste_laden()
+            return
         if w in ANGABEN:
             a, v, typ = ANGABEN[w]
             self.typ.setCurrentIndex(self.typ.findData(typ))
@@ -850,9 +889,9 @@ class KabelReiter(QWidget):
                    f"Jetzt „{pruefling}“ dazwischen stecken: ")
                 + f"Netzteil → {pruefling} → Trigger-Adapter → DL24. Dann auf „weiter“ drücken.")
         if hoechst > REF_GUT_MOHM:
-            text += (f"\n\n⚠ Die Referenz hat {hoechst:.0f} mΩ – mehr als {REF_GUT_MOHM:.0f} mΩ. Das Referenzkabel "
-                     "(oder das Netzteil) ist wohl nicht gut genug; das Ergebnis fällt entsprechend zu klein aus. "
-                     "Besser mit einem kürzeren Kabel neu starten.")
+            text += (f"\n\nHinweis: Die Referenz ist mit {hoechst:.0f} mΩ recht hoch. Liegt das am Netzteil (z. B. "
+                     "einem Step-Down-Modul), ist das kein Problem – es wird abgezogen. Ist dagegen das Referenzkabel "
+                     "schlecht, fällt das Ergebnis zu gut aus; dann besser mit einem kürzeren Kabel neu starten.")
         return text
 
     def _fertig_spannungen(self, ab: nt.TriggerAblauf) -> None:
@@ -1045,6 +1084,8 @@ class KabelReiter(QWidget):
         for i, d in enumerate(self._alle):
             ampel = d.get("ampel")
             bewertung = {"gruen": "✔ in Ordnung", "gelb": "⚠ schwach", "rot": "✘ Schrott"}.get(ampel, "–")
+            if zu_warm(d):
+                bewertung, ampel = "✘ zu warm", "rot"
             erg = angabe_pruefen(d)
             if erg:
                 # mit Angabe zählt, ob es die hält
@@ -1091,11 +1132,20 @@ class KabelReiter(QWidget):
                                                   f"Kabelbericht {name} {datetime.now():%Y-%m-%d}.pdf", "PDF (*.pdf)")
             if not pfad:
                 return None
+        from . import normen
+        from .netzteil_reiter import normen_html
         doc = QTextDocument()
         doc.addResource(QTextDocument.ImageResource, QUrl("kurve.png"), diagramm_bild(d))
+        quellen = normen.kabel_eintraege()
+        for i, n in enumerate(quellen):
+            try:
+                doc.addResource(QTextDocument.ImageResource, QUrl(f"qr{i}.png"), normen.qr_bild(n["url"]))
+            except Exception:
+                log.exception("QR-Code")
         doc.setHtml(bericht_html(d) + "<p><b>Verlauf</b></p><p><img src='kurve.png' width='640'></p>"
                     "<p style='color:gray'>Oben die Spannung am DL24, in der Mitte der Strom, unten die Temperatur "
-                    "am Stecker mit der Grenze der Norm (+30 K über der Starttemperatur).</p>")
+                    "am Stecker mit der Grenze der Norm (+30 K über der Starttemperatur).</p>"
+                    + normen_html(quellen))
         w = QPdfWriter(pfad)
         w.setPageSize(QPageSize(QPageSize.A4))
         w.setPageMargins(QMarginsF(15, 15, 15, 15), QPageLayout.Millimeter)

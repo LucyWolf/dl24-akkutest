@@ -506,7 +506,7 @@ def test_kabeltester():
     assert d["kabel_mohm"] == 117 and d["ampel"] == "gruen" and abs(d["bis_a"] - 0.75 / 0.117) < 0.01
     assert [round(v, 3) for _, v, _ in d["tabelle"]] == [0.117, 0.234, 0.351]
     h = kr.bericht_html(dict(d, name="Testkabel", wann=0))
-    assert "117 mΩ" in h and "237 mΩ mit Kabel − 120 mΩ ohne" in h and "+9 K" in h
+    assert "117 mΩ" in h and "237 mΩ mit Kabel − 120 mΩ ohne" in h and "+9,0 K" in h
     assert kr.auswerten(None, 300, "usbc5")["ohne_referenz"]
     # Erwärmung nach USB Type-C Compliance B-6-1: höchstens +30 K
     gut = dict(kr.auswerten(0, 120, "usbc5", 24.0, 41.0), pruef_a=5.0, stabil=True, wann=0)
@@ -522,6 +522,12 @@ def test_kabeltester():
     g, punkte = kr.angabe_pruefen(schlecht)
     h = kr.bericht_html(schlecht)
     assert g == "nicht" and "Warum nicht" in h and "50 mΩ zu viel" in h and "1,00 V" in h, h
+    # zu warm: die große Zeile darf nicht grün „In Ordnung“ sagen
+    warm = dict(kr.auswerten(0, 90, "usbc3", 27.5, 60.0), pruef_a=3.0, stabil=False, wann=0, angabe_w=60,
+                je_spannung=[(20.0, 0, 90, 90, 3.0)])
+    h = kr.bericht_html(warm)
+    assert "Nicht in Ordnung: zu warm (+32,5 K" in h and "Taugt für die vollen" not in h, h
+    assert "darüber wird es zu warm" in h
     offen = dict(gut, pruef_a=3.0, je_spannung=[(20.0, 0, 120, 120, 3.0)])
     g, punkte = kr.angabe_pruefen(offen)
     h = kr.bericht_html(offen)
@@ -568,7 +574,7 @@ def test_kabeltester():
     assert warten(lambda: kt.knopf_weiter.isVisible(), 60), kt.schritt.text()
     assert 100 <= kt._ref <= 140 and "„Kurz 15 cm“ HERAUSZIEHEN" in kt.schritt.text(), kt.schritt.text()
     assert "background:#fff1d6" in kt.schritt.styleSheet()        # auffällig: jetzt muss jemand etwas tun
-    assert "⚠ Die Referenz hat" in kt.schritt.text()          # 120 mΩ: über 80 mΩ
+    assert "Die Referenz ist mit" in kt.schritt.text()          # 120 mΩ: über 80 mΩ
     f.geraet.v.geraet.akku.innen += 0.100          # jetzt steckt ein Kabel mit 100 mΩ dazwischen
     kt.knopf_weiter.click()
     assert warten(lambda: not kt.laeuft and kt.ergebnis.isVisible(), 90), kt.schritt.text()
@@ -577,6 +583,14 @@ def test_kabeltester():
     assert 80 <= d["kabel_mohm"] <= 120 and d["ampel"] == "gruen" and d["nenn_a"] == 3.0, d
     assert "Taugt bis" in kt.ergebnis.text() and "3 A – mehr ist" in kt.ergebnis.text()
     assert "Referenzkabel „Kurz 15 cm“" in kt.ergebnis.text()
+    # Angabe nachträglich ändern: neu bewertet und gespeichert, ohne neue Messung
+    kt.angabe.setCurrentIndex(kt.angabe.findData(100))
+    assert kt._letztes["angabe_w"] == 100 and kt._letztes["typ"] == "usbc5"
+    assert "100 W" in kt.ergebnis.text() and "100 W" in kt.tabelle.item(0, 3).text(), kt.tabelle.item(0, 3).text()
+    assert kt._liste()[0]["angabe_w"] == 100
+    kt.angabe.setCurrentIndex(0)
+    kt.typ.setCurrentIndex(kt.typ.findData("usbc3"))
+    kt.strom.setValue(2.0)
     # die Referenz wurde gespeichert - beim nächsten Mal ohne Schritt 1
     assert kt.ref_wahl.count() == 2 and "Kurz 15 cm" in kt.ref_wahl.itemText(1)
     kt.ref_wahl.setCurrentIndex(1)
@@ -593,6 +607,15 @@ def test_kabeltester():
     assert f.nt.kabel_name.text() == "Testkabel"
     pdf = Path(os.environ["AKKUTEST_DATEN"]) / "kabel.pdf"
     assert kt.bericht_speichern(str(pdf)) == str(pdf) and pdf.stat().st_size > 5000
+    from akkutest import normen as nm
+    q = nm.kabel_eintraege()
+    assert "4.4.1" in q[0]["norm"] and "B-6-1" in q[1]["norm"] and q[2]["titel"] == "Gesetzlicher Bezug"
+    import subprocess
+    try:
+        text = subprocess.run(["pdftotext", str(pdf), "-"], capture_output=True, text=True).stdout
+        assert not text or ("Grundlage der Grenzwerte" in text and "62680-1-3" in text), text[-800:]
+    except FileNotFoundError:
+        pass
     bild = kr.diagramm_bild(dict(d, kurve=[[0, 5.0, 0, 25.0], [60, 4.9, 1.0, 27.0], [120, 4.8, 2.0, 30.0]],
                                  temp_start=25.0))
     assert bild.width() >= 800 and bild.height() >= 400, (bild.width(), bild.height())
