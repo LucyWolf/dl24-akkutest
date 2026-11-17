@@ -371,7 +371,8 @@ def test_kabel_herausrechnen_nur_wenn_gewaehlt():
     an = lauf(True)
     print("herausgerechnet:", an.urteil, an.gruende, an.stufen[-1].buchse_v)
     assert an.urteil == "gut" and an.stufen[-1].ok and an.stufen[-1].buchse_v > 5.0, an.gruende
-    assert not any("Am Kabelende" in g for g in an.gruende)
+    assert any("Am Kabelende nur" in g and "Ausgangsbuchse" in g for g in an.gruende), an.gruende
+    assert any("Am Ende des Kabels kamen aber nur" in s for s in an.laien), an.laien
     import sys as _s
     from akkutest.netzteil_reiter import ergebnis_html, messaufbau_html, geprueft_text
     e = nt.NetzteilEinstellung("INIU 5 V", 5.0, 3.0, kabel_mohm=114, kabel_raus=True).__dict__

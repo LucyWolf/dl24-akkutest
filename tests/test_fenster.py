@@ -12,6 +12,7 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ["AKKUTEST_DATEN"] = tempfile.mkdtemp()
+os.environ["AKKUTEST_KEINE_UPDATES"] = "1"
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from PySide6.QtWidgets import QApplication, QMessageBox
@@ -495,6 +496,18 @@ def test_schnellladen_im_fenster():
     assert alle[0]["name"] == "Schnelllader" and f.nt.tabelle.item(0, 2).text() == "PD/QC 5/9 V", f.nt.tabelle.item(0, 2).text()
     assert f.nt.tabelle.item(0, 4).text().startswith("bis ")
     f.trennen()
+    f.close()
+
+
+def test_update_leiste():
+    f = fenster.Fenster(Speicher())
+    f.show()
+    assert f.knopf_update.isVisible() and not f.update_leiste.isVisible()
+    f._update_stand({"neuer": True, "verfuegbar": "9.9.9", "installiert": fenster.VERSION, "aktualisierbar": True})
+    assert f.update_leiste.isVisible() and "9.9.9" in f.update_text.text() and f.knopf_jetzt.isVisible()
+    f._update_von_hand = True
+    f._update_stand({"neuer": False, "installiert": fenster.VERSION, "fehler": None})
+    assert "neueste Version" in f.banner.text()
     f.close()
 
 

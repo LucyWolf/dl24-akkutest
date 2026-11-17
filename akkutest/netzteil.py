@@ -530,6 +530,11 @@ def bewerten(e: NetzteilEinstellung, r: NetzteilErgebnis) -> None:
                 r.spez_verletzt = r.spez_verletzt or e.pd
                 gruende.append(f"Spannung fällt bis zum Nennstrom auf {_k(tiefst)} V {wo} – unter der Toleranz "
                                f"({_k(e.untere_v)} V{quelle})")
+    mess_tief = min((x.min_v for x in bis_nenn), default=None)
+    grenze_u = USB_MIN_V if e.usb else e.untere_v
+    if kabel and tiefst is not None and tiefst >= grenze_u and mess_tief is not None and mess_tief < grenze_u:
+        gruende.append(f"Am Kabelende nur {_k(mess_tief)} V – unter {_k(grenze_u)} V; bewertet ist die "
+                       "Ausgangsbuchse (Kabel herausgerechnet)")
     if not kabel and e.kabel_mohm and tiefst is not None and tiefst < (USB_MIN_V if e.usb else e.untere_v):
         gruende.append(f"Davon entfallen bei {_k(e.strom_a)} A etwa {_k(e.strom_a * e.kabel_mohm, 0)} mV auf das "
                        f"Kabel ({_k(e.kabel_mohm, 0)} mΩ) – ein besseres Kabel hebt die Spannung entsprechend")
@@ -691,7 +696,15 @@ def laien_saetze(e: NetzteilEinstellung, r: NetzteilErgebnis, tiefst: float | No
         s.append(f"Versprochen sind {_k(e.strom_a)} Ampere ({_k(versprochen_w, 1)} Watt). Das Gerät "
                  f"schaltet aber schon bei {_k(r.abschalt_a)} Ampere ab – es schafft also nicht, was draufsteht.")
     if tiefst is not None and e.usb:
-        if tiefst >= USB_MIN_V:
+        mess = min((x.min_v for x in r.stufen if x.soll_a <= e.strom_a + 1e-6), default=None)
+        if tiefst >= USB_MIN_V and kabel and mess is not None and mess < USB_MIN_V:
+            # das Gerät hält die Vorgabe - nur mit diesem Kabel kommt zu wenig an
+            s.append(f"Das Gerät selbst hält die Vorgabe der {SPEZ}: an seiner Ausgangsbuchse mindestens "
+                     f"{_k(tiefst)} Volt (verlangt {_k(USB_MIN_V)} Volt).")
+            s.append(f"Am Ende des Kabels kamen aber nur {_k(mess)} Volt an – mit diesem Kabel bekommt ein "
+                     "angeschlossenes Gerät weniger, als die Vorgabe verlangt. Ein kürzeres oder dickeres Kabel "
+                     "behebt das.")
+        elif tiefst >= USB_MIN_V:
             s.append(f"Die Spannung bleibt dabei im Bereich, den die {SPEZ} vorgibt: mindestens "
                      f"{_k(USB_MIN_V)} Volt ({'an der Buchse' if kabel else 'gemessen'}: {_k(tiefst)} Volt). Angeschlossene Geräte werden "
                      "zuverlässig versorgt.")

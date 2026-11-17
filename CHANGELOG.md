@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.52 – 17.11.2026
+
+- **Updater:** Die App sieht kurz nach dem Start und danach alle sechs
+  Stunden auf GitHub nach einer neueren Version (oder von Hand mit
+  „Updates“). Gibt es eine, erscheint eine Leiste mit „Jetzt aktualisieren“:
+  Windows lädt das Setup, prüft die Prüfsumme, installiert still und startet
+  neu; Linux tauscht die geprüfte Programmdatei aus und startet neu. Passt die
+  Prüfsumme nicht, wird nichts ersetzt; während eines Tests wird nicht
+  aktualisiert.
+- **Kabel herausgerechnet, aber am Kabelende zu wenig:** Der Bericht sagt
+  jetzt ausdrücklich, dass das Gerät die Vorgabe hält, beim angeschlossenen
+  Gerät mit diesem Kabel aber weniger ankommt.
+
 ## 1.0.51 – 17.11.2026
 
 - **Vorlage TZT/CKCS PD65W:** 15 V jetzt mit 3 A statt „ermitteln“ –

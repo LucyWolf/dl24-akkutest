@@ -67,6 +67,7 @@ class Bruecke(QObject):
     fehler = Signal(str)
     verbunden = Signal(object, str)        # Geraet oder None, Fehlertext
     gefunden = Signal(object, str)         # Liste Anschlüsse, Fehlertext
+    update = Signal(object)                # Stand der Update-Prüfung (dict)
 
 
 class Anzeige(QFrame):
@@ -123,6 +124,7 @@ class Fenster(QMainWindow):
         self.banner.setWordWrap(True)
         self.banner.hide()
         lay.addWidget(self.banner)
+        lay.addWidget(self._update_leiste())
         self.reiter = QTabWidget()
         self.reiter.addTab(self._reiter_test(), "Test")
         self.reiter.addTab(self._reiter_akkus(), "Akkus && Verlauf")
@@ -165,7 +167,79 @@ class Fenster(QMainWindow):
         self.status = QLabel("nicht verbunden")
         self.status.setMinimumWidth(260)
         h.addWidget(self.status)
+        self.knopf_update = QPushButton("Updates")
+        self.knopf_update.setToolTip(f"Installiert: {VERSION} – auf GitHub nach einer neueren Fassung sehen")
+        self.knopf_update.clicked.connect(lambda: self.update_pruefen(von_hand=True))
+        h.addWidget(self.knopf_update)
         return h
+
+    # -- Updates -------------------------------------------------------------
+    def _update_leiste(self) -> QWidget:
+        w = QFrame()
+        w.setStyleSheet("QFrame{background:#e8f5e9; border-radius:4px;} QLabel{color:#1b5e20; font-weight:bold;}")
+        h = QHBoxLayout(w)
+        h.setContentsMargins(8, 4, 8, 4)
+        self.update_text = QLabel()
+        h.addWidget(self.update_text, 1)
+        self.knopf_jetzt = QPushButton("Jetzt aktualisieren")
+        self.knopf_jetzt.clicked.connect(self.update_einspielen)
+        h.addWidget(self.knopf_jetzt)
+        spaeter = QPushButton("Später")
+        spaeter.clicked.connect(w.hide)
+        h.addWidget(spaeter)
+        w.hide()
+        self.update_leiste = w
+        self.b.update.connect(self._update_stand)
+        # kurz nach dem Start nachsehen, danach alle sechs Stunden
+        QTimer.singleShot(4000, self.update_pruefen)
+        self._update_uhr = QTimer(self)
+        self._update_uhr.timeout.connect(self.update_pruefen)
+        self._update_uhr.start(6 * 3600 * 1000)
+        return w
+
+    def update_pruefen(self, von_hand: bool = False) -> None:
+        import os
+        if os.environ.get("AKKUTEST_KEINE_UPDATES") and not von_hand:
+            return                                   # Tests: nicht von selbst bei GitHub anklopfen
+        from . import aktualisieren
+        self._update_von_hand = von_hand
+        threading.Thread(target=lambda: self.b.update.emit(aktualisieren.pruefen()), daemon=True).start()
+
+    def _update_stand(self, stand: dict) -> None:
+        von_hand = getattr(self, "_update_von_hand", False)
+        self._update_von_hand = False
+        if stand.get("neuer"):
+            self.update_text.setText(f"Neue Version {stand['verfuegbar']} verfügbar (installiert {stand['installiert']})")
+            self.knopf_jetzt.setVisible(bool(stand.get("aktualisierbar")))
+            if not stand.get("aktualisierbar"):
+                self.update_text.setText(self.update_text.text() + " – aus dem Quellordner: mit git holen")
+            self.update_leiste.show()
+        elif von_hand:
+            text = (f"Keine Verbindung zu GitHub: {stand['fehler']}" if stand.get("fehler")
+                    else f"Du hast die neueste Version ({stand['installiert']}).")
+            self.b.ereignis.emit("warnung" if stand.get("fehler") else "info", text)
+
+    def update_einspielen(self) -> None:
+        from . import aktualisieren
+        if self.ablauf and self.ablauf.laeuft or self.pruefung_laeuft:
+            QMessageBox.information(self, "Update", "Es läuft gerade ein Test. Erst nach dem Test aktualisieren.")
+            return
+        self.knopf_jetzt.setEnabled(False)
+        self.update_text.setText("Update wird geladen und geprüft …")
+        QApplication.processEvents()
+        try:
+            if self.geraet:
+                self.trennen()
+            neu = aktualisieren.einspielen()
+        except Exception as f:
+            log.exception("Update")
+            self.knopf_jetzt.setEnabled(True)
+            self.update_text.setText(f"Update fehlgeschlagen: {f}")
+            return
+        self.update_text.setText(f"Version {neu} wird installiert – das Programm startet gleich neu …")
+        QApplication.processEvents()
+        if sys.platform != "win32":
+            aktualisieren.neu_starten()
 
     def anschluesse_laden(self) -> None:
         vorher = self.anschluss.currentData()
