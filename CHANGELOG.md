@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.48 – 17.11.2026
+
+- **Diagramm bleibt bei der laufenden Prüfung:** War vom vorigen Test noch
+  das Ergebnis offen (Ergebnisfenster, PDF), stellte die App das Diagramm
+  während der neuen Prüfung auf die alte zurück – mit deren Stufenmarken und
+  Zeitachse. Jetzt kommt es immer auf die laufende Prüfung zurück.
+- **Alte Prüfungen während einer Prüfung ansehen:** Ein Klick in die Liste
+  öffnet sie im eigenen Fenster, mit Bericht und PDF – die laufende Anzeige
+  bleibt unberührt. Vorher ging das während einer Prüfung gar nicht.
+
 ## 1.0.47 – 17.11.2026
 
 - **Widerstand während der Prüfung ohne Sprung auf 0:** Die Anzeige rechnet

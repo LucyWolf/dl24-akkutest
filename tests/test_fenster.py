@@ -345,6 +345,19 @@ def test_netzteil_reiter():
     f.nt.kabel.setValue(500)                 # schon ein Wert drin - neu messen muss trotzdem gehen
     f.nt.kabel_messen()
     assert f.nt.laeuft
+    # während einer Prüfung eine alte ansehen: eigenes Fenster, das laufende Diagramm bleibt
+    assert warten(lambda: len(f.nt.ablauf.ergebnis.marken) >= 1, 10)
+    f.nt._fenster = None
+    f.nt.tabelle.clearSelection()
+    f.nt.tabelle.selectRow(0)
+    app.processEvents()
+    assert f.nt._fenster is not None and f.nt._fenster.isVisible()
+    from PySide6.QtWidgets import QTextBrowser
+    assert "Test-Lader" in f.nt._fenster.findChild(QTextBrowser).toPlainText()
+    live = [x.label.toPlainText() for x in f.nt._marken]
+    soll = [text for _, text in f.nt.ablauf.ergebnis.marken]
+    assert live == soll[:len(live)] and "↑ 2,10 A" not in live, (live, soll)
+    f.nt._fenster.close()
     assert warten(lambda: not f.nt.laeuft, 60)
     app.processEvents()
     assert 100 <= f.nt.kabel.value() <= 150, f.nt.kabel.value()

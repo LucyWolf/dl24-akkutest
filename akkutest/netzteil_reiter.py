@@ -433,6 +433,8 @@ class NetzteilReiter(QWidget):
         self._teil_ab = 0                  # Schnellladen: ab diesem Punkt gehört die Kurve zur aktuellen Spannung
         self._teil_gezeigt = None
         self._nenn_v: float | None = None
+        self._bericht_kurve: list | None = None      # Bericht für eine andere als die angezeigte Prüfung
+        self._bericht_wann: float | None = None
         self._bauen()
         self.vorlagen_laden()
         self._vorlage(0)
@@ -1649,7 +1651,11 @@ class NetzteilReiter(QWidget):
 
     def _alten_zeigen(self) -> None:
         d = self._gewaehlt()
-        if not d or self.laeuft:
+        if not d:
+            return
+        if self.laeuft:
+            # Während einer Prüfung: die alte im eigenen Fenster - das Diagramm der laufenden bleibt
+            self.ergebnis_fenster(d["einstellung"], d["ergebnis"], d["kurve"], d["wann"])
             return
         self._angezeigt_kurve = d["kurve"]
         self._zeigen(d["einstellung"], d["ergebnis"], d["wann"])
@@ -1683,8 +1689,15 @@ class NetzteilReiter(QWidget):
             self.f.b.ereignis.emit("info", f"Kabelwert {r['widerstand_mohm']:.0f} mΩ übernommen – gilt ab der "
                                            "nächsten Prüfung")
 
-    def _bericht_dokument(self, e: dict, r: dict):
+    def _bericht_dokument(self, e: dict, r: dict, kurve: list | None = None, wann: float | None = None):
         """Derselbe Inhalt fürs Fenster und fürs PDF."""
+        self._bericht_kurve, self._bericht_wann = kurve, wann
+        try:
+            return self._bericht_dokument_bauen(e, r)
+        finally:
+            self._bericht_kurve = self._bericht_wann = None
+
+    def _bericht_dokument_bauen(self, e: dict, r: dict):
         from PySide6.QtCore import QUrl
         from PySide6.QtGui import QTextDocument
         from . import normen
@@ -1709,9 +1722,11 @@ class NetzteilReiter(QWidget):
         teile = [(f"{_kurz(t['einstellung']['nenn_v'])} V", t["einstellung"], t["ergebnis"], t.get("kurve"))
                  for t in r.get("teile") or []]
         if not teile:
-            teile = [("", e, r, getattr(self, "_angezeigt_kurve", None))]
+            teile = [("", e, r, self._bericht_kurve if self._bericht_kurve is not None
+                      else getattr(self, "_angezeigt_kurve", None))]
         bilder = []
-        vorher = (self._nenn_v, self._teil_ab, self._teil_gezeigt)
+        vorher = (self._nenn_v, self._teil_ab, self._teil_gezeigt, self._kabel_r)
+        self._kabel_r = (e.get("kabel_mohm") or 0) / 1000
         try:
             for titel, te, tr, kurve in teile:
                 if not kurve:
@@ -1724,8 +1739,11 @@ class NetzteilReiter(QWidget):
                 self.bild.enableAutoRange(x=True)
                 bilder.append((titel, self._hell_abfotografieren()))
         finally:
+            self._nenn_v, self._teil_ab, self._teil_gezeigt, self._kabel_r = vorher
+            if self.laeuft:
+                self._live_zeigen()
+                return bilder
             # Bildschirm wie vorher: die angezeigte Prüfung als Ganzes
-            self._nenn_v, self._teil_ab, self._teil_gezeigt = vorher
             ganz = getattr(self, "_angezeigt_kurve", None) or []
             self._grenzen_zeigen(None if e.get("trigger") else einstellung_aus(e))
             self._kurven(ganz)
@@ -1733,6 +1751,19 @@ class NetzteilReiter(QWidget):
             self._marken_zeichnen(r.get("marken") or [])
             self.bild.enableAutoRange(x=True)
         return bilder
+
+    def _live_zeigen(self) -> None:
+        """Das Diagramm wieder auf die laufende Prüfung stellen: Grenzen, Kurve, Marken, Zeitachse."""
+        ab = self.ablauf
+        teil = ab.teil if isinstance(ab, nt.TriggerAblauf) else ab
+        self._grenzen_zeigen(teil.einstellung if isinstance(teil, nt.NetzteilAblauf) else None)
+        self._kurven(list(ab.punkte))
+        self._marken_zeichnen([], neu=True)
+        self._marken_zeichnen(list(ab.ergebnis.marken))
+        if self._geplant_s:
+            self.bild.setXRange(0, max(self._geplant_s, ab.punkte[-1][0] if ab.punkte else 0) / 60, padding=0.02)
+        else:
+            self.bild.enableAutoRange(x=True)
 
     def _bericht_html(self, e: dict, r: dict) -> str:
         breite = 640
@@ -1744,7 +1775,8 @@ class NetzteilReiter(QWidget):
         else:
             strom = e["nenn_a"] or (e["nenn_w"] / e["nenn_v"] if e["nenn_v"] else 0)
             angabe = f"{_kurz(e['nenn_v'])} V / {_kurz(round(strom, 2))} A ({_kurz(round(e['nenn_v'] * strom, 1))} W)"
-        wann = datetime.fromtimestamp(self._angezeigt_wann) if getattr(self, "_angezeigt_wann", None) \
+        wann_s = self._bericht_wann if self._bericht_wann is not None else getattr(self, "_angezeigt_wann", None)
+        wann = datetime.fromtimestamp(wann_s) if wann_s \
             else datetime.now()
         return (
             f"<h2>Prüfbericht: {name}</h2>"
@@ -1769,10 +1801,14 @@ class NetzteilReiter(QWidget):
             "Schwankungen, nicht das schnelle Brummen (Ripple) eines Netzteils – dafür braucht es ein "
             "Oszilloskop.</p>")
 
-    def ergebnis_fenster(self) -> None:
-        """Das ganze Ergebnis in einem eigenen Fenster - unten im Reiter ist dafür zu wenig Platz."""
+    def ergebnis_fenster(self, e: dict | None = None, r: dict | None = None, kurve: list | None = None,
+                         wann: float | None = None) -> None:
+        """Das ganze Ergebnis in einem eigenen Fenster - unten im Reiter ist dafür zu wenig Platz.
+        Ohne Angaben: die angezeigte Prüfung; sonst eine bestimmte (z. B. eine alte während einer Prüfung)."""
         from PySide6.QtWidgets import QDialog, QDialogButtonBox, QTextBrowser
-        e, r = getattr(self, "_angezeigt", (None, None))
+        if e is None:
+            e, r = getattr(self, "_angezeigt", (None, None))
+            kurve = wann = None
         if not e:
             return
         dlg = QDialog(self)
@@ -1781,24 +1817,27 @@ class NetzteilReiter(QWidget):
         dlg.resize(900, 1000)
         lay = QVBoxLayout(dlg)
         anzeige = QTextBrowser()
-        anzeige.setDocument(self._bericht_dokument(e, r))
+        anzeige.setDocument(self._bericht_dokument(e, r, kurve, wann))
         anzeige.document().setParent(anzeige)
         lay.addWidget(anzeige)
         knoepfe = QDialogButtonBox(QDialogButtonBox.Close)
         pdf = knoepfe.addButton("Bericht speichern (PDF) …", QDialogButtonBox.ActionRole)
-        pdf.clicked.connect(lambda: self.bericht_speichern())
+        pdf.clicked.connect(lambda: self.bericht_speichern(None, e, r, kurve, wann))
         knoepfe.rejected.connect(dlg.close)
         lay.addWidget(knoepfe)
         dlg.setAttribute(Qt.WA_DeleteOnClose)
         self._fenster = dlg
         dlg.show()
 
-    def bericht_speichern(self, pfad: str | None = None) -> str | None:
+    def bericht_speichern(self, pfad: str | None = None, e: dict | None = None, r: dict | None = None,
+                          kurve: list | None = None, wann: float | None = None) -> str | None:
         """Ergebnis als PDF: Urteil, Werte, Kennlinie und das Diagramm."""
         from PySide6.QtCore import QMarginsF
         from PySide6.QtGui import QPageLayout, QPageSize, QPdfWriter
         from PySide6.QtWidgets import QFileDialog
-        e, r = getattr(self, "_angezeigt", (None, None))
+        if e is None:
+            e, r = getattr(self, "_angezeigt", (None, None))
+            kurve = wann = None
         if not e:
             return None
         if not pfad:
@@ -1807,7 +1846,7 @@ class NetzteilReiter(QWidget):
                                                   f"Prüfbericht {name} {datetime.now():%Y-%m-%d}.pdf", "PDF (*.pdf)")
             if not pfad:
                 return None
-        doc = self._bericht_dokument(e, r)
+        doc = self._bericht_dokument(e, r, kurve, wann)
         w = QPdfWriter(pfad)
         w.setPageSize(QPageSize(QPageSize.A4))
         w.setPageMargins(QMarginsF(15, 15, 15, 15), QPageLayout.Millimeter)
