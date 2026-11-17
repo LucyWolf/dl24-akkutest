@@ -415,6 +415,21 @@ def test_kurz_bei_nur_ermittelt():
     assert "Ermittelt: liefert bis 54,0 W" in h and "Volt:</b> Ermittelt. Auf dem" in h and ": . " not in h, h
 
 
+def test_dauertest_bis_stabil():
+    # Temperatur steigt und bleibt dann gleich: der Dauertest endet, bevor die Zeit um ist
+    alt = (nt.STABIL_MIN_S, nt.STABIL_FENSTER_S)
+    nt.STABIL_MIN_S, nt.STABIL_FENSTER_S = 120.0, 60.0
+    try:
+        q = SimNetzteil(5.0, innen_mohm=100, abschalt_a=9, heiz_c_je_w=0.0)
+        e = nt.NetzteilEinstellung("Kabel", 5.0, 2.0, stufentest=False, dauertest=True, dauer_min=30,
+                                   bis_stabil=True, temp_grenze=90)
+        ab, _ = durchspielen(q, e, frist=60)
+        r = ab.ergebnis
+        assert r.temp_stabil and r.dauer is not None and r.dauer_s < 30 * 60 * 0.5, (r.dauer_s, r.hinweise)
+    finally:
+        nt.STABIL_MIN_S, nt.STABIL_FENSTER_S = alt
+
+
 def test_zu_hohe_spannung():
     q = SimNetzteil(5.6, innen_mohm=50, abschalt_a=9)
     e = nt.NetzteilEinstellung("Billig", 5.0, 1.0, stufen=2, stufe_s=10, dauertest=False, toleranz_proz=20)

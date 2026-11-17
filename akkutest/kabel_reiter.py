@@ -8,8 +8,9 @@ Die Differenz ist das Kabel. Danach auf Wunsch ein Dauertest beim Nennstrom mit 
 Temperaturfühler am Stecker.
 
 Grenzen für den Widerstand: USB Type-C Cable and Connector Specification §4.4.1 bzw.
-USB 2.0 §7.2.2 (siehe netzteil.KABEL_TYPEN). Für die Erwärmung gibt es hier keine
-Ampel - nur Messung und Abbruch an der eingestellten Grenze.
+USB 2.0 §7.2.2 (siehe netzteil.KABEL_TYPEN). Erwärmung: USB Type-C Compliance Document,
+Prüfung B-6-1 (EIA-364-70): beim Nennstrom höchstens 30 °C über der Raumtemperatur, gemessen
+außen am Steckergehäuse über den VBUS-/GND-Kontakten, gewartet bis die Temperatur stabil ist.
 """
 from __future__ import annotations
 
@@ -35,6 +36,7 @@ from .speicher import datenordner
 log = logging.getLogger("akkutest.kabel")
 
 AMPEL = {"gruen": "#2e9e4f", "gelb": "#c77700", "rot": "#d03b3b"}
+ERWAERMUNG_MAX_K = 30.0      # USB Type-C Compliance Document B-6-1
 
 
 def auswerten(ref_mohm: float | None, gesamt_mohm: float, typ: str, temp_start: float | None = None,
@@ -53,7 +55,21 @@ def auswerten(ref_mohm: float | None, gesamt_mohm: float, typ: str, temp_start: 
         "tabelle": tabelle, "ampel": bewertung[0] if bewertung else None,
         "satz": bewertung[1] if bewertung else "Für eine Bewertung den Kabeltyp wählen.",
         "temp_start": temp_start, "temp_max": temp_max, "ohne_referenz": ref_mohm is None,
+        "erwaermung_k": (round(temp_max - temp_start, 1) if temp_max is not None and temp_start is not None
+                         else None),
     }
+
+
+def kritisch(d: dict) -> tuple[float, str] | None:
+    """Ab welchem Strom das Kabel kritisch wird - die kleinere der beiden Grenzen:
+    Wärme (Erwärmung wächst mit I², hochgerechnet auf +30 K) oder Spannungsabfall (750 mV)."""
+    kandidaten = []
+    k, strom = d.get("erwaermung_k"), d.get("pruef_a")
+    if k is not None and strom and k > 0.5:
+        kandidaten.append((strom * (ERWAERMUNG_MAX_K / k) ** 0.5, "durch Wärme (+30 K)"))
+    if d.get("bis_a"):
+        kandidaten.append((d["bis_a"], "durch Spannungsabfall (750 mV)"))
+    return min(kandidaten) if kandidaten else None
 
 
 def bericht_html(d: dict) -> str:
@@ -86,6 +102,32 @@ def bericht_html(d: dict) -> str:
         if d.get("temp_start") is not None:
             t += f" (Start {zahl(d['temp_start'], 1)} °C, +{d['temp_max'] - d['temp_start']:.0f} K)"
         tab.append(("Temperatur am Stecker", t))
+        k = d.get("erwaermung_k")
+        if k is not None:
+            ok = k <= ERWAERMUNG_MAX_K
+            strom = d.get("pruef_a")
+            voll = strom is None or strom >= d.get("nenn_a", 0) - 1e-6
+            text = (f"<b style='color:{AMPEL['gruen' if ok else 'rot']}'>{'✔ bestanden' if ok else '✘ nicht bestanden'}"
+                    f"</b>: +{zahl(k, 1)} K, erlaubt höchstens +{zahl(ERWAERMUNG_MAX_K, 0)} K über der "
+                    "Raumtemperatur (USB Type-C Compliance Document, Prüfung B-6-1 / EIA-364-70)")
+            if not voll:
+                text += (f"<br><span style='color:#c77700'>Geprüft mit {zahl(strom, 1)} A – die Norm prüft beim "
+                         f"Nennstrom ({zahl(d['nenn_a'], 0)} A). Das Ergebnis gilt nur für {zahl(strom, 1)} A.</span>")
+            if not d.get("stabil"):
+                text += ("<br><span style='color:gray'>Die Temperatur war beim Ende noch nicht stabil – "
+                         "mit längerem Dauertest wird sie noch etwas höher.</span>")
+            tab.append(("Erwärmung", text))
+    krit = kritisch(d)
+    if krit:
+        a, grund = krit
+        ueber = a < d.get("nenn_a", 0)
+        tab.append(("Kritisch ab", f"<b style='color:{AMPEL['rot' if ueber else 'gruen']}'>etwa {zahl(min(a, 99), 1)} A"
+                                   f"</b> {grund}" + (f" – <b>unter dem Nennstrom von {zahl(d['nenn_a'], 0)} A</b>"
+                                                      if ueber else "")
+                                   + "<br><span style='color:gray'>Schätzung aus der Messung: Die Erwärmung wächst "
+                                     "mit dem Quadrat des Stroms. Warmes Kupfer leitet etwas schlechter – der echte "
+                                     "Wert liegt eher etwas darunter. Am genauesten nahe am Nennstrom geprüft."
+                                     "</span>"))
     z.append("<table cellspacing=4>" + "".join(f"<tr><td style='color:gray'>{a}</td><td>{b}</td></tr>"
                                                  for a, b in tab) + "</table>")
     if d.get("je_spannung"):
@@ -171,7 +213,10 @@ class KabelReiter(QWidget):
         self.mit_dauer = QCheckBox("Dauertest beim Prüfstrom, Minuten:")
         self.dauer_min = QSpinBox()
         self.dauer_min.setRange(1, 120)
-        self.dauer_min.setValue(10)
+        self.dauer_min.setValue(30)
+        self.dauer_min.setToolTip("Höchstens so lange. Endet früher, sobald die Temperatur stabil ist (nach "
+                                  "mindestens 10 Minuten, weniger als 0,5 °C Änderung in 5 Minuten) – so misst "
+                                  "auch die Norm.")
         zeile = QHBoxLayout()
         zeile.addWidget(self.mit_dauer)
         zeile.addWidget(self.dauer_min)
@@ -192,9 +237,13 @@ class KabelReiter(QWidget):
         self.temp_grenze.setValue(int(float(self._einst.value("kt/temp_grenze", 50) or 50)))
         self.mit_fuehler.toggled.connect(lambda an: self._einst.setValue("kt/fuehler", an))
         self.temp_grenze.valueChanged.connect(lambda w: self._einst.setValue("kt/temp_grenze", w))
-        hinweis = QLabel("Ein gutes 5-V-Netzteil verwenden, das den Prüfstrom liefert (für 5 A ein Netzteil "
-                         "und Adapter, die 5 A können). Den Fühler mit Klebeband an den Stecker kleben – dort "
-                         "wird ein schlechtes Kabel zuerst warm.")
+        hinweis = QLabel("<b>Ablauf:</b> 1. Netzteil <b>ohne</b> das Kabel am DL24 (Adapter mit USB-C-Stecker "
+                         "oder kürzestes Kabel) – Referenz. 2. Das Kabel dazwischen stecken – Messung. Die "
+                         "Differenz ist das Kabel.<br><br>So prüft auch die USB-Norm: beim <b>Nennstrom</b> des Kabels (5-A-Kabel mit 5 A), "
+                         "Fühler außen auf das Steckergehäuse kleben, ruhige Luft, Dauertest bis die Temperatur "
+                         "stabil ist. Erlaubt sind höchstens 30 °C über Raumtemperatur. Die Spannung spielt für die "
+                         "Erwärmung keine Rolle – nur der Strom. Den Fühler vor dem Start nicht anfassen: die "
+                         "Starttemperatur gilt als Raumtemperatur.")
         hinweis.setWordWrap(True)
         hinweis.setStyleSheet(gedaempft())
         f.addRow(hinweis)
@@ -316,7 +365,7 @@ class KabelReiter(QWidget):
             return nt.NetzteilEinstellung("Referenz ohne Kabel", 5.0, a, stufen=4, stufe_s=10, dauertest=False,
                                           abschalttest=False, fuehler=False, temp_grenze=90)
         return nt.NetzteilEinstellung(self.name.text().strip() or "Kabel", 5.0, a, stufen=5, stufe_s=15,
-                                      dauertest=self.mit_dauer.isChecked(), dauer_proz=100,
+                                      dauertest=self.mit_dauer.isChecked(), dauer_proz=100, bis_stabil=True,
                                       dauer_min=self.dauer_min.value(), abschalttest=False,
                                       fuehler=self.mit_fuehler.isChecked(), temp_grenze=self.temp_grenze.value())
 
@@ -345,10 +394,21 @@ class KabelReiter(QWidget):
             return
         self.ergebnis.hide()
         self._ref = None
+        if self.mit_ref.isChecked() and not self.f._frage(
+                "Schritt 1: Referenz ohne Kabel",
+                "Zuerst wird das Netzteil OHNE das zu prüfende Kabel gemessen.\n\n"
+                "So verbinden:\n"
+                "• am besten über einen Adapter mit USB-C-Stecker (z. B. Trigger-Adapter), der direkt im "
+                "Netzteil steckt – auf der anderen Seite am DL24,\n"
+                "• oder, ohne solchen Adapter, über das kürzeste und dickste Kabel, das du hast (10–20 cm). "
+                "Dann zählt es zur Referenz, das Ergebnis ist um seinen Widerstand zu klein.\n\n"
+                "Danach sagt die App, wann das zu prüfende Kabel dazwischen kommt.\n\n"
+                "Ist das Netzteil so am DL24 angeschlossen?"):
+            return
         if self.mit_ref.isChecked():
             self.phase = "ref"
-            self.schritt.setText("Schritt 1 von 2: Netzteil über einen kurzen Adapter DIREKT am DL24 – ohne das Kabel. "
-                                 "Referenz wird gemessen …")
+            self.schritt.setText("Schritt 1 von 2: Netzteil OHNE das zu prüfende Kabel am DL24 (Adapter mit Stecker "
+                                 "oder kürzestes Kabel). Referenz wird gemessen …")
             self._lauf(self._einstellung(ref=True))
         else:
             self._kabel_phase()
@@ -441,8 +501,9 @@ class KabelReiter(QWidget):
                 self.f._zustand_zeigen()
                 return
             self._ref = r.widerstand_mohm
-            self.schritt.setText(f"Referenz: Netzteil + Adapter {self._ref:.0f} mΩ. Jetzt das Kabel zwischen "
-                                 "Netzteil und DL24 stecken (gleicher Adapter) und auf „weiter“ drücken.")
+            self.schritt.setText(f"Referenz: Netzteil + Adapter {self._ref:.0f} mΩ.\n\nJetzt das zu prüfende Kabel "
+                                 "dazwischen stecken: Netzteil → Kabel → derselbe Adapter → DL24. Dann auf „weiter“ "
+                                 "drücken.")
             self.knopf_start.hide()
             self.knopf_weiter.show()
             from PySide6.QtWidgets import QApplication
@@ -455,6 +516,7 @@ class KabelReiter(QWidget):
             return
         d = auswerten(self._ref, r.widerstand_mohm, self.typ.currentData(), r.temp_start, r.temp_max)
         d["pruef_a"] = self.strom.value()
+        d["stabil"] = r.temp_stabil
         d.update(name=self.name.text().strip(), wann=time.time(), zu_heiss=r.zu_heiss,
                  kurve=[list(p) for p in nt.duennen(ab.punkte, 600)])
         self._zeigen(d)
@@ -506,6 +568,7 @@ class KabelReiter(QWidget):
         d["ohne_referenz"] = not ref
         d["gesamt_mohm"] = sum(x[2] for x in je) / len(je)
         d["ref_mohm"] = d["gesamt_mohm"] - kabel
+        d["stabil"] = any(t["ergebnis"].get("temp_stabil") for t in ab.ergebnis.teile)
         d.update(name=self.name.text().strip(), wann=time.time(), je_spannung=je, fehlt=fehlt,
                  pruef_a=self.strom.value(), kurve=[list(p) for p in nt.duennen(ab.punkte, 900)])
         self._zeigen(d)

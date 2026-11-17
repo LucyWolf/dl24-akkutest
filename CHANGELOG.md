@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.56 – 17.11.2026
+
+- **Kabeltest nach USB-Norm:** Erwärmung nach USB Type-C Compliance
+  Document, Prüfung B-6-1 (EIA-364-70): beim Nennstrom höchstens +30 K über
+  Raumtemperatur am Steckergehäuse – bestanden/nicht bestanden, mit Hinweis,
+  wenn mit weniger als dem Nennstrom geprüft wurde.
+- **Dauertest „bis stabil“:** endet von selbst, wenn die Temperatur sich
+  5 Minuten lang um weniger als 0,5 °C ändert (frühestens nach 10 Minuten).
+- **„Kritisch ab“:** Schätzung, ab welchem Strom das Kabel kritisch wird –
+  durch Wärme (hochgerechnet auf +30 K) oder Spannungsabfall (750 mV).
+- **Anleitung zur Referenz:** Vor dem Start erklärt die App, wie das Netzteil
+  ohne das zu prüfende Kabel angeschlossen wird (Adapter mit Stecker oder
+  kürzestes Kabel), und fragt nach, ob es so steckt.
+
 ## 1.0.55 – 17.11.2026
 
 - **Kabeltest über alle Spannungen:** Mit „Alle Spannungen über den

@@ -508,6 +508,17 @@ def test_kabeltester():
     h = kr.bericht_html(dict(d, name="Testkabel", wann=0))
     assert "117 mΩ" in h and "237 mΩ mit Kabel − 120 mΩ ohne" in h and "+9 K" in h
     assert kr.auswerten(None, 300, "usbc5")["ohne_referenz"]
+    # Erwärmung nach USB Type-C Compliance B-6-1: höchstens +30 K
+    gut = dict(kr.auswerten(0, 120, "usbc5", 24.0, 41.0), pruef_a=5.0, stabil=True, wann=0)
+    assert "✔ bestanden" in kr.bericht_html(gut) and "B-6-1" in kr.bericht_html(gut)
+    heiss = dict(kr.auswerten(0, 120, "usbc5", 24.0, 58.0), pruef_a=3.0, stabil=False, wann=0)
+    h = kr.bericht_html(heiss)
+    assert "✘ nicht bestanden" in h and "gilt nur für 3,0 A" in h and "noch nicht stabil" in h
+    # kritisch: 3 A machen +12 K -> +30 K bei 3·√(30/12) ≈ 4,7 A; Spannungsabfall erst bei 0,75/0,12 = 6,25 A
+    krit = kr.kritisch(dict(kr.auswerten(0, 120, "usbc5", 24.0, 36.0), pruef_a=3.0))
+    assert abs(krit[0] - 3 * (30 / 12) ** 0.5) < 0.01 and "Wärme" in krit[1], krit
+    h = kr.bericht_html(dict(kr.auswerten(0, 120, "usbc5", 24.0, 36.0), pruef_a=3.0, stabil=True, wann=0))
+    assert "Kritisch ab" in h and "etwa 4,7 A" in h and "unter dem Nennstrom von 5 A" in h, h
     # im Fenster: Referenz ohne Kabel, dann "Kabel" mit 100 mΩ mehr
     geraet.HID_INTERVALL = 0.02
     SimulatorVerbindung.voreinstellung = {"tempo": 60}

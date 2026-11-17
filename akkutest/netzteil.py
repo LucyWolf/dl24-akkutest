@@ -27,6 +27,11 @@ EINSCHWINGEN_S = 2.0      # so lange nach jedem Stromwechsel nicht bewerten
 ABSCHALT_SCHRITT = 0.05   # Abschalttest: +5 % des Nennstroms je Schritt
 ABSCHALT_STUFE_S = 10.0
 ZUSAMMENBRUCH = 0.5       # unter 50 % der Nennspannung gilt das Netzteil als aus
+# Dauertest "bis stabil": frühestens nach STABIL_MIN_S, wenn die Temperatur sich in den
+# letzten STABIL_FENSTER_S um weniger als STABIL_K geändert hat
+STABIL_MIN_S = 600.0
+STABIL_FENSTER_S = 300.0
+STABIL_K = 0.5
 
 # Powerbanks
 PB_WARTEN_S = 90.0        # so lange auf Spannung warten (Knopf an der Powerbank drücken)
@@ -122,6 +127,7 @@ class NetzteilEinstellung:
     kap_a: float = 1.0
     nenn_mah_aus: float = 0.0  # "Rated capacity" vom Aufdruck: was neu am Ausgang (5 V) herauskommt
     kabel_raus: bool = False   # vom Nutzer gewählt: Kabel herausrechnen, bewertet wird an der Buchse
+    bis_stabil: bool = False   # Dauertest endet, wenn die Temperatur sich nicht mehr ändert (EIA-364-70)
 
     @property
     def neu_wh(self) -> tuple[float, bool]:
@@ -335,6 +341,7 @@ class NetzteilErgebnis:
     kap_anteil: float | None = None        # % der Aufdruck-Energie
     kap_mah_zelle: float | None = None     # abgegebene Energie umgerechnet auf die Zellspannung
     autoaus: bool = False                  # womöglich die Abschaltautomatik statt leer
+    temp_stabil: bool = False              # Dauertest endete, weil die Temperatur stabil war
     zustand_proz: float | None = None      # Akkuzustand: gemessen gegen neu
     zustand_geschaetzt: bool = False       # ohne "Rated capacity" aus der Zellenergie geschätzt
     kap_min_v: float | None = None         # tiefste Spannung beim Entladen (ohne die letzte Minute)
@@ -1060,6 +1067,13 @@ class NetzteilAblauf:
             self._werte.append(m)
         if s.art == "kapazitaet":
             r.kap_s = round(im_schritt, 1)
+        if s.art == "dauer" and e.bis_stabil and im_schritt >= STABIL_MIN_S and self._stabil(m):
+            r.hinweise.append(f"Temperatur stabil nach {dauer_kurz(im_schritt)} (weniger als "
+                              f"{_k(STABIL_K, 1)} °C Änderung in {dauer_kurz(STABIL_FENSTER_S)})")
+            r.temp_stabil = True
+            self._werten_schritt()
+            self._naechster(m)
+            return
         if im_schritt >= s.dauer_s:
             if s.art == "kapazitaet":
                 self._last_aus()
@@ -1067,6 +1081,12 @@ class NetzteilAblauf:
                 return
             self._werten_schritt()
             self._naechster(m)
+
+    def _stabil(self, m: Messwert) -> bool:
+        """Hat sich die Temperatur im letzten Fenster kaum noch geändert?"""
+        t_jetzt = self.punkte[-1][0] if self.punkte else 0
+        fenster = [p[3] for p in self.punkte if p[3] is not None and p[0] >= t_jetzt - STABIL_FENSTER_S]
+        return len(fenster) >= 10 and max(fenster) - min(fenster) < STABIL_K
 
     def _werten_schritt(self) -> None:
         s, e = self.schritt, self.einstellung
