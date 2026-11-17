@@ -263,6 +263,7 @@ def test_netzteil_reiter():
     from PySide6.QtWidgets import QTextBrowser
     text = f.nt._fenster.findChild(QTextBrowser).toPlainText()
     assert f.nt._fenster.isVisible() and "Kurz gesagt" in text and "Messwerte für Fachleute" in text
+    assert "Grundlage der Grenzwerte" in text and "62680-2-1" in text and "Gesetzlicher Bezug" in text, text
     assert "Messaufbau" in text and "Kabel / Adapter" in text and "nicht bekannt" in text, text
     foto(f.nt._fenster, "12-ergebnisfenster")
     f.nt._fenster.close()

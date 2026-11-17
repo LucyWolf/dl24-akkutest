@@ -380,6 +380,30 @@ def test_kabel_herausrechnen_nur_wenn_gewaehlt():
     assert "herausgerechnet" in geprueft_text(e, r) and "an der Buchse" in ergebnis_html(e, r, fach=True)
 
 
+def test_normen_im_bericht():
+    from akkutest import normen
+    from akkutest.netzteil_reiter import normen_fuer, normen_html
+    assert 28.0 in nt.TRIGGER_SPANNUNGEN
+    e28 = nt.trigger_einstellung(nt.NetzteilEinstellung("PD", 5.0, 3.0), 28.0, 5.0)
+    assert [round(x, 2) for x in e28.grenzen()] == [26.1, 26.6, 29.4, 29.9]
+    q = normen.quelle(28.0)
+    assert "EPR" in q["titel"] and "nicht eigens nachgewiesen" in q["werte"] and "26,60–29,40" in q["werte"]
+    assert "62680-2-1" in normen.quelle(5.0)["norm"] and "7.2.2" in normen.quelle(5.0)["norm"]
+    teile = {"teile": [{"einstellung": {"nenn_v": v}} for v in (5.0, 9.0, 12.0, 5.0)]}
+    liste = normen_fuer({}, teile)
+    assert [n["titel"] for n in liste] == ["5 V (USB)", "9 V (USB Power Delivery)", "12 V (USB Power Delivery)",
+                                           "Gesetzlicher Bezug"], liste
+    assert "nicht für Netzteile" in liste[-1]["werte"] and "2022/2380" in liste[-1]["norm"]
+    eigen = normen_fuer({"nenn_v": 12.0, "toleranz_proz": 5}, {})
+    assert eigen[0]["norm"].startswith("keine Norm") and not eigen[0]["url"]
+    h = normen_html(liste)
+    assert "qr0.png" in h and "eur-lex.europa.eu" in h and "keine Gesetze" in h
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    bild = normen.qr_bild(normen.EU_URL)
+    assert bild.width() >= 90 and bild.width() == bild.height()
+
+
 def test_zu_hohe_spannung():
     q = SimNetzteil(5.6, innen_mohm=50, abschalt_a=9)
     e = nt.NetzteilEinstellung("Billig", 5.0, 1.0, stufen=2, stufe_s=10, dauertest=False, toleranz_proz=20)

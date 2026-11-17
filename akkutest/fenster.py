@@ -949,7 +949,8 @@ def pruefen() -> int:
     import bleak   # noqa: F401
     import hid     # noqa: F401  - USB-HID; die native Bibliothek muss im Bündel mit
     hid.enumerate(0x0483, 0x5750)
-    print("pyserial, bleak, hidapi, pyqtgraph: da")
+    import qrcode  # noqa: F401  - QR-Codes zu den Normen im Bericht
+    print("pyserial, bleak, hidapi, pyqtgraph, qrcode: da")
     from .simulator import SimAkku, SimulatorVerbindung
     v = SimulatorVerbindung(akku=SimAkku(mah=500), tempo=500, bericht_s=0.02)
     v.oeffnen()

@@ -331,6 +331,38 @@ def ergebnis_html(e: dict, r: dict, fach: bool = False) -> str:
     return "<br>".join(zeilen)
 
 
+def normen_fuer(e: dict, r: dict) -> list[dict]:
+    """Woher die Grenzwerte der geprüften Spannungen stammen."""
+    from . import normen
+    if r.get("teile"):
+        volt = [t["einstellung"]["nenn_v"] for t in r["teile"]]
+        eigene = []
+    elif e.get("nenn_v", 0) <= 5.5 or e.get("pd"):
+        volt, eigene = [e["nenn_v"]], []
+    else:
+        volt = []
+        eigene = [{"titel": f"{_kurz(e['nenn_v'])} V (Netzteil)",
+                   "norm": "keine Norm – Toleranz wie auf dem Typenschild bzw. eingestellt",
+                   "werte": f"grün ±{_kurz(e.get('toleranz_proz', 5))} %, gelb bis zur doppelten Toleranz, sonst rot "
+                            "(Einteilung dieser Software)", "url": ""}]
+    return normen.eintraege(volt) if volt else eigene + [normen.gesetz()]
+
+
+def normen_html(eintraege: list[dict]) -> str:
+    if not eintraege:
+        return ""
+    zeilen = ["<h3>Grundlage der Grenzwerte</h3><table cellspacing=6>"]
+    for i, n in enumerate(eintraege):
+        qr = (f"<td valign=top><img src='qr{i}.png' width=90 height=90></td>" if n.get("url") else "<td></td>")
+        link = (f"<br><span style='color:gray'>Quelle: {html.escape(n['url'])}</span>" if n.get("url") else "")
+        zeilen.append(f"<tr>{qr}<td valign=top><b>{html.escape(n['titel'])}</b><br>{html.escape(n['norm'])}<br>"
+                      f"{html.escape(n['werte'])}{link}</td></tr>")
+    zeilen.append("</table><p style='color:gray'>Den QR-Code mit dem Handy scannen, um die Quelle zu öffnen. "
+                  "Die USB-Spezifikationen sind Industrienormen des USB-IF, die als IEC- bzw. EN-Normen übernommen "
+                  "wurden – keine Gesetze.</p>")
+    return "".join(zeilen)
+
+
 def trigger_html(e: dict, r: dict, fach: bool = False) -> str:
     zeilen = [f"<b style='font-size:15px'>{html.escape(e['name'] or 'Ladegerät')}</b> – Schnellladen über "
               "Trigger-Adapter"]
@@ -500,6 +532,9 @@ class NetzteilReiter(QWidget):
         for i, v in enumerate(nt.TRIGGER_SPANNUNGEN):
             haken = QCheckBox(f"{_kurz(v)} V")
             haken.setChecked(v <= 12)
+            if v > 20.5:
+                haken.setToolTip("28 V gibt es nur mit USB PD EPR (Extended Power Range): Netzteil, Trigger-Adapter "
+                                 "und Kabel müssen EPR können – das Kabel 5 A / 240 W.")
             haken.toggled.connect(self._angabe_zeigen)
             a = self._zahlfeld(0, 5, 2, 0.25, " A", "unbekannt – ermitteln")
             sb.addWidget(haken, i + 1, 0)
@@ -1612,10 +1647,18 @@ class NetzteilReiter(QWidget):
         """Derselbe Inhalt fürs Fenster und fürs PDF."""
         from PySide6.QtCore import QUrl
         from PySide6.QtGui import QTextDocument
+        from . import normen
         doc = QTextDocument()
         self._bilder = self._diagramme(e, r)
         for i, (_, bild) in enumerate(self._bilder):
             doc.addResource(QTextDocument.ImageResource, QUrl(f"kurve{i}.png"), bild)
+        self._normen = normen_fuer(e, r)
+        for i, n in enumerate(self._normen):
+            if n.get("url"):
+                try:
+                    doc.addResource(QTextDocument.ImageResource, QUrl(f"qr{i}.png"), normen.qr_bild(n["url"]))
+                except Exception:
+                    log.exception("QR-Code")
         doc.setHtml(self._bericht_html(e, r))
         return doc
 
@@ -1678,6 +1721,7 @@ class NetzteilReiter(QWidget):
             "am Kabelende, also so, wie es beim Gerät ankommt. Mitte: Strom und Leistung. Darunter, wenn ein "
             "Kabelwert eingetragen war: Verlust im Kabel in Watt (lila) und als Anteil an der Leistung des Netzteils "
             "in Prozent (türkis gestrichelt). Unten: Temperatur, wenn ein Fühler angebracht war.</p>"
+            + normen_html(getattr(self, "_normen", [])) +
             f"<h3>Messwerte für Fachleute</h3>{ergebnis_html(e, r, fach=True)}"
             "<p style='color:gray'><b>Schwankung</b> = Unterschied zwischen höchstem und tiefstem Wert innerhalb "
             "einer Stufe. Grün bis 1 %, gelb bis 3 %, rot darüber – das ist eine Einschätzung dieser Software, keine "

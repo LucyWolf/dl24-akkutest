@@ -1112,7 +1112,7 @@ class NetzteilAblauf:
 # ----------------------------------------------------------------------
 # Schnellladegeräte (USB-PD / QC) über einen Trigger-Adapter
 # ----------------------------------------------------------------------
-TRIGGER_SPANNUNGEN = [5.0, 9.0, 12.0, 15.0, 20.0]
+TRIGGER_SPANNUNGEN = [5.0, 9.0, 12.0, 15.0, 20.0, 28.0]     # 28 V: USB PD EPR (240-W-Kabel und EPR-Adapter)
 TRIGGER_TREFFER = 0.08        # ±8 % um die gewünschte Spannung gilt als "kommt an"
 TRIGGER_WARTEN_S = 120.0      # so lange auf das Umschalten warten, dann "nicht unterstützt"
 

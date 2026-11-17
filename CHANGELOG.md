@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.44 – 17.11.2026
+
+- **Bericht: „Grundlage der Grenzwerte“** – je geprüfter Spannung die Norm
+  mit Abschnitt und Werten und ein QR-Code zur Quelle: 5 V nach USB 2.0
+  §7.2.2 (IEC/EN 62680-2-1), 9–28 V nach USB Power Delivery §7.1.8
+  (EN IEC 62680-1-2). Dazu der gesetzliche Bezug: Richtlinie 2014/53/EU in der
+  Fassung (EU) 2022/2380, Anhang Ia – mit dem Hinweis, dass sie für die
+  geladenen Geräte gilt, nicht für Netzteile, Ladegeräte oder Powerbanks.
+  Normale Netzteile: „keine Norm – Toleranz wie auf dem Typenschild“.
+- **28 V (USB PD EPR)** beim Trigger-Adapter. Belegt sind ±5 %; die
+  0,5-V-Zone ist aus der allgemeinen Regel übernommen und so gekennzeichnet.
+- Neue Abhängigkeit: `qrcode` (reines Python).
+
 ## 1.0.43 – 17.11.2026
 
 - **Haken „Kabel herausrechnen“** (Netzteile und Powerbanks), standardmäßig

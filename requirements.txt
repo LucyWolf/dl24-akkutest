@@ -3,3 +3,4 @@ pyqtgraph>=0.13.7
 bleak>=0.22
 pyserial>=3.5
 hidapi>=0.14
+qrcode>=7.4,<9
