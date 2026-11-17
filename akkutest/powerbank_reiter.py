@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import dataclasses
 
-from PySide6.QtWidgets import QCheckBox, QDoubleSpinBox, QGridLayout, QGroupBox, QLabel
+from PySide6.QtWidgets import QCheckBox, QComboBox, QDoubleSpinBox, QGridLayout, QGroupBox, QLabel
 
 from . import netzteil as nt
 from .fenster import gedaempft, zahl
@@ -51,31 +51,79 @@ class PowerbankReiter(NetzteilReiter):
                                   "Der Prüfstrom fällt nie darunter.")
         f.insertRow(zeile + 3, "Mindeststrom:", self.mindest_a)
 
-        g = QGroupBox("Kapazität")
+        g = QGroupBox("Was prüfen?")
         k = QGridLayout(g)
+        self.modus = QComboBox()
+        self.modus.addItem("Lasttest – Spannungen und Leistung (kurz)", "last")
+        self.modus.addItem("Kapazitätstest – bis leer entladen (Stunden)", "kap")
+        self.modus.addItem("Beides – erst Lasttest, dann Kapazität", "beides")
+        self.modus.setToolTip("Lasttest: hält sie Spannung und Leistung (alle Spannungen, auch über den "
+                              "Trigger-Adapter)?\nKapazitätstest: wie viel steckt noch drin, wie abgenutzt ist "
+                              "sie?")
+        k.addWidget(self.modus, 0, 0, 1, 2)
         self.mit_kap = QCheckBox("Kapazitätstest: bis leer entladen mit")
         self.mit_kap.setToolTip("Misst, wie viel Energie wirklich herauskommt. Die Powerbank vorher voll laden! "
                                 "Dauert je nach Größe Stunden.")
         self.kap_a = self._zahlfeld(0.1, 5.0, 2, 0.1, " A")
         self.kap_a.setValue(1.0)
-        k.addWidget(self.mit_kap, 0, 0)
-        k.addWidget(self.kap_a, 0, 1)
+        self.mit_kap.hide()                   # Zustand kommt aus der Auswahl oben
+        k.addWidget(QLabel("Strom beim Entladen:"), 1, 0)
+        k.addWidget(self.kap_a, 1, 1)
         hinweis = QLabel("Die Powerbank vorher <b>ganz voll laden</b>. Der Kapazitätstest kommt zum Schluss, nach allen "
                          "Spannungen und dem Abschalttest. Daraus ergibt sich der Akkuzustand: wie viel sie noch "
                          "von dem kann, was sie neu konnte (ab 80 % gut).")
         hinweis.setWordWrap(True)
         hinweis.setStyleSheet(gedaempft())
-        k.addWidget(hinweis, 1, 0, 1, 2)
+        k.addWidget(hinweis, 2, 0, 1, 2)
+        self.kap_hinweis = hinweis
         self._links.insertWidget(self._links.indexOf(self.tests_gruppe), g)
         self.kap_gruppe = g
         self.mit_dauer.setChecked(False)
         for w in (self.mah, self.zell_v, self.wh, self.mindest_a, self.kap_a, self.nenn_mah_aus):
             w.valueChanged.connect(self._angabe_zeigen)
         self.mit_kap.toggled.connect(self._kap_umschalten)
+        self._schnell_vorher = False
+        self.modus.currentIndexChanged.connect(self._modus_umschalten)
+        self._modus_umschalten()
         self._breite_anpassen()               # neue Felder: sonst schneidet die linke Spalte ab
 
     def _kap_umschalten(self, an: bool) -> None:
         self._angabe_zeigen()
+
+    @property
+    def nur_kap(self) -> bool:
+        return hasattr(self, "modus") and self.modus.currentData() == "kap"
+
+    def _modus_umschalten(self, *_) -> None:
+        m = self.modus.currentData()
+        self.mit_kap.setChecked(m in ("kap", "beides"))
+        # nur Kapazität: bei 5 V, ohne Trigger-Adapter und ohne Lasttest
+        if m == "kap" and self.schnell.isChecked():
+            self._schnell_vorher = True
+            self.schnell.setChecked(False)
+        elif m != "kap" and self._schnell_vorher:
+            self._schnell_vorher = False
+            self.schnell.setChecked(True)
+        self._modus_anwenden()
+        self._angabe_zeigen()
+
+    def _modus_anwenden(self) -> None:
+        if not hasattr(self, "modus"):
+            return
+        kap, last = self.nur_kap, self.modus.currentData() != "kap"
+        frei = not self.laeuft
+        for w in (self.mit_stufen, self.stufen, self.stufe_s, self.mit_dauer, self.dauer_proz, self.dauer_min,
+                  self.mit_abschalt, self.bis_ende):
+            w.setEnabled(frei and last)
+        self.max_proz.setEnabled(frei and last and not self.bis_ende.isChecked())
+        self.schnell.setEnabled(frei and not kap)
+        self.kap_a.setEnabled(frei and not self.modus.currentData() == "last")
+        self.modus.setEnabled(frei)
+        self.kap_hinweis.setVisible(not self.modus.currentData() == "last")
+
+    def zustand_zeigen(self, g, anderer_test: bool) -> None:
+        super().zustand_zeigen(g, anderer_test)
+        self._modus_anwenden()
 
     def _felder_sperren(self) -> None:
         super()._felder_sperren()
@@ -83,6 +131,7 @@ class PowerbankReiter(NetzteilReiter):
             for w in (self.mah, self.zell_v, self.wh, self.nenn_mah_aus, self.mindest_a):
                 w.setEnabled(not self.laeuft)
             self.kap_gruppe.setEnabled(not self.laeuft and self.bereit())
+            self._modus_anwenden()
 
     def _ist_hub(self) -> bool:
         return False
@@ -115,6 +164,8 @@ class PowerbankReiter(NetzteilReiter):
         if not hasattr(self, "mah"):
             return e
         name = self.name.text().strip() or self.name.placeholderText().split("z. B.")[0].strip() or "Powerbank"
+        if self.nur_kap:
+            e = dataclasses.replace(e, stufentest=False, dauertest=False, abschalttest=False, bis_ende=False)
         return dataclasses.replace(e, name=name, powerbank=True, hub=False, toleranz_proz=5.0,
                                    mah=self.mah.value(), zell_v=round(self.zell_v.value(), 2),
                                    wh=round(self.wh.value(), 1), mindest_a=round(self.mindest_a.value(), 2),
@@ -145,6 +196,7 @@ class PowerbankReiter(NetzteilReiter):
         super()._freigeben()
         if hasattr(self, "kap_gruppe"):
             self.kap_gruppe.setEnabled(self.bereit() and not self.laeuft)
+            self._modus_anwenden()
 
     def _dauer_zeigen(self) -> None:
         if not self.bereit():

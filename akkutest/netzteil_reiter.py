@@ -229,10 +229,10 @@ def ergebnis_html(e: dict, r: dict, fach: bool = False) -> str:
     if r.get("widerstand_mohm"):
         w_ges, kabel = r["widerstand_mohm"], e.get("kabel_mohm", 0)
         if kabel:
-            text = (f"{w_ges:.0f} mΩ gesamt, davon Kabel {kabel:.0f} mΩ → Netzteil ≈ "
+            text = (f"{w_ges:.0f} mΩ gesamt, davon Kabel {kabel:.0f} mΩ → {'Powerbank' if pb else 'Netzteil'} ≈ "
                     f"<b>{max(0, w_ges - kabel):.0f} mΩ</b>")
         else:
-            text = f"<b>{w_ges:.0f} mΩ</b> (Netzteil + Kabel + Adapter)"
+            text = f"<b>{w_ges:.0f} mΩ</b> ({'Powerbank' if pb else 'Netzteil'} + Kabel + Adapter)"
         tab.append(("Widerstand", text))
     if r.get("max_w") is not None:
         text = f"in der Toleranz <b>{zahl(r['max_w_tol'], 1) + ' W' if r.get('max_w_tol') else '–'}</b>"
@@ -245,7 +245,7 @@ def ergebnis_html(e: dict, r: dict, fach: bool = False) -> str:
             # am DL24 kommt an, was das Kabel übrig lässt - der Rest wird im Kabel zu Wärme
             verlust = groesst["strom"] ** 2 * k_ohm
             text += (f"<br>dazu {zahl(verlust, 1)} W im Kabel verloren (bei {zahl(groesst['strom'], 2)} A) – "
-                     f"das Netzteil selbst gibt etwa {zahl(groesst['spannung'] * groesst['strom'] + verlust, 1)} W ab")
+                     f"{'die Powerbank' if pb else 'das Netzteil'} selbst gibt etwa {zahl(groesst['spannung'] * groesst['strom'] + verlust, 1)} W ab")
         tab.append(("Leistung", text))
     d = r.get("dauer")
     if d:

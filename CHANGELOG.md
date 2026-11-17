@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.42 – 17.11.2026
+
+- **Powerbank: „Was prüfen?“ als Auswahl** statt des Hakens beim
+  Kapazitätstest – Lasttest (Spannungen und Leistung, auch über den
+  Trigger-Adapter), Kapazitätstest (nur bis leer bei 5 V, Lasttest und
+  Trigger gesperrt) oder beides. Zurück auf Lasttest stellt „Schnellladen“
+  wieder her.
+- Im Ergebnis steht bei Powerbanks „Powerbank“ statt „Netzteil“.
+
 ## 1.0.41 – 17.11.2026
 
 - **Keine falsche Sicherheitsabschaltung beim Herunterstellen:** Beim Wechsel

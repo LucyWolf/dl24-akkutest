@@ -458,6 +458,7 @@ def test_schnellladen_im_fenster():
 
 
 def test_powerbank_im_fenster():
+    from akkutest import netzteil as nt
     geraet.HID_INTERVALL = 0.02
     SimulatorVerbindung.voreinstellung = {"tempo": 100}
     sp = Speicher()
@@ -480,11 +481,19 @@ def test_powerbank_im_fenster():
     assert [(v, h.isChecked(), a.value()) for v, h, a in pb.trigger][:3] == [(5.0, True, 3.0), (9.0, True, 2.22),
                                                                             (12.0, True, 1.5)]
     assert pb.schnell.isChecked()                       # die INIU kann PD - Haken kommt mit
-    pb.mit_kap.setChecked(True)
+    assert pb.modus.currentData() == "last" and not pb.mit_kap.isChecked()
+    pb.modus.setCurrentIndex(pb.modus.findData("beides"))
     plan = pb._plan()
     assert [(e.nenn_v, e.kapazitaet) for e in plan] == [(5, False), (9, False), (12, False), (5, True)], plan
     assert "Umschalten" in pb.dauer.text() and pb.schnell.isVisible() and pb.schnell_box.isVisible()
-    pb.mit_kap.setChecked(False)
+    # nur Kapazität: 5 V, ohne Trigger-Adapter und ohne Lasttest
+    pb.modus.setCurrentIndex(pb.modus.findData("kap"))
+    assert not pb.schnell.isChecked() and not pb.schnell.isEnabled() and not pb.mit_stufen.isEnabled()
+    e = pb.einstellung()
+    assert e.kapazitaet and not (e.stufentest or e.dauertest or e.abschalttest)
+    assert [s.art for s in nt.plan(e)] == ["kapazitaet"] and len(pb._plan()) == 1
+    pb.modus.setCurrentIndex(pb.modus.findData("last"))
+    assert pb.schnell.isChecked() and pb.mit_stufen.isEnabled() and not pb.mit_kap.isChecked()   # wie vorher
     pb.schnell.setChecked(False)
     pb.vorlage.setCurrentIndex(pb.vorlage.findText("Anker 325", flags=fenster.Qt.MatchStartsWith))
     pb._vorlage()
@@ -498,7 +507,7 @@ def test_powerbank_im_fenster():
     assert "2,2 Wh" in pb.angabe_hinweis.text(), pb.angabe_hinweis.text()
     pb.stufen.setValue(2)
     pb.stufe_s.setValue(10)
-    pb.mit_kap.setChecked(True)
+    pb.modus.setCurrentIndex(pb.modus.findData("beides"))
     assert pb.mit_abschalt.isEnabled()                  # geht zusammen: erst Abschalttest, dann Kapazität
     e = pb.einstellung()
     assert e.powerbank and e.kapazitaet and e.mah == 600 and e.mindest_a == 0.3 and not e.hub
