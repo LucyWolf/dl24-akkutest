@@ -549,6 +549,7 @@ def test_kabeltester():
     assert 80 <= d["kabel_mohm"] <= 120 and d["ampel"] == "gruen" and d["nenn_a"] == 3.0, d
     assert "Taugt bis" in kt.ergebnis.text() and "3 A – mehr ist" in kt.ergebnis.text()
     assert "Referenzkabel „Kurz 15 cm“" in kt.ergebnis.text()
+    assert "Geprüft mit" in kt.ergebnis.text() and "W</b> (2,00 A" in kt.ergebnis.text(), kt.ergebnis.text()
     assert kt.tabelle.rowCount() == 1 and "Testkabel" in kt.tabelle.item(0, 1).text()
     foto(f, "16-kabeltester")
     kt.uebernehmen()
@@ -556,6 +557,14 @@ def test_kabeltester():
     assert f.nt.kabel_name.text() == "Testkabel"
     pdf = Path(os.environ["AKKUTEST_DATEN"]) / "kabel.pdf"
     assert kt.bericht_speichern(str(pdf)) == str(pdf) and pdf.stat().st_size > 5000
+    bild = kr.diagramm_bild(dict(d, kurve=[[0, 5.0, 0, 25.0], [60, 4.9, 1.0, 27.0], [120, 4.8, 2.0, 30.0]],
+                                 temp_start=25.0))
+    assert bild.width() >= 800 and bild.height() >= 400, (bild.width(), bild.height())
+    assert bild.pixelColor(5, 5).lightness() > 240            # heller Grund, auch im dunklen Design
+    if FOTOS:
+        bild.save(str(FOTOS / "17-kabel-diagramm.png"))
+        import shutil
+        shutil.copy(pdf, FOTOS / "kabel.pdf")
     # über den Trigger-Adapter: Referenz bei 5 und 9 V, dann mit Kabel bei 5 und 9 V
     from akkutest import netzteil as nt_mod
     nt_mod.TRIGGER_WARTEN_S = 30
@@ -591,6 +600,7 @@ def test_kabeltester():
     print("Kabel je Spannung:", d["je_spannung"], d["kabel_mohm"])
     assert [x[0] for x in d["je_spannung"]] == [5.0, 9.0] and 60 <= d["kabel_mohm"] <= 100, d
     assert all(x[5] is not None for x in d["je_spannung"]) and "Stecker max." in kt.ergebnis.text()
+    assert all(x[6] and x[7] for x in d["je_spannung"]) and "Leistung" in kt.ergebnis.text()
     assert "Je Spannung" in kt.ergebnis.text() and "9 V" in kt.ergebnis.text()
     quelle.innen -= 0.080
     f.nt.kabel.setValue(0)

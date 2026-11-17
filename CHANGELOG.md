@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.58 – 17.11.2026
+
+- **Kabelbericht mit richtigem Diagramm:** eigens gezeichnet, hell und in
+  fester Größe – Spannung, Strom und Temperatur am Stecker mit der Grenze
+  +30 K. Vorher ein dunkler, flacher Streifen vom Bildschirm.
+- **Prüfbedingungen im Kabelbericht:** höchste Leistung (W) mit Strom und
+  Spannung und die Prüfdauer; in „Je Spannung“ Leistung und Dauer je
+  Spannung.
+- „Kritisch ab“ durch Wärme ist als vorläufig markiert, wenn die Temperatur
+  beim Ende noch nicht stabil war.
+
 ## 1.0.57 – 17.11.2026
 
 - **Kabeltest mit Referenzkabel:** Neues Feld „Referenzkabel“ (gemerkt). Die

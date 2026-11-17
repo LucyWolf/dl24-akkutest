@@ -61,16 +61,34 @@ def auswerten(ref_mohm: float | None, gesamt_mohm: float, typ: str, temp_start: 
     }
 
 
+def bedingungen(punkte: list) -> dict:
+    """Womit geprüft wurde: höchste Leistung, höchster Strom, Spannung dabei, Dauer."""
+    last = [p for p in punkte if len(p) > 2 and p[2] > 0.01]
+    if not last:
+        return {}
+    hoch = max(last, key=lambda p: p[1] * p[2])
+    return {"max_w": round(hoch[1] * hoch[2], 1), "max_a": round(max(p[2] for p in last), 2),
+            "bei_v": round(hoch[1], 2), "dauer_s": round(punkte[-1][0] - punkte[0][0], 0)}
+
+
 def kritisch(d: dict) -> tuple[float, str] | None:
     """Ab welchem Strom das Kabel kritisch wird - die kleinere der beiden Grenzen:
     Wärme (Erwärmung wächst mit I², hochgerechnet auf +30 K) oder Spannungsabfall (750 mV)."""
     kandidaten = []
     k, strom = d.get("erwaermung_k"), d.get("pruef_a")
     if k is not None and strom and k > 0.5:
-        kandidaten.append((strom * (ERWAERMUNG_MAX_K / k) ** 0.5, "durch Wärme (+30 K)"))
+        kandidaten.append((strom * (ERWAERMUNG_MAX_K / k) ** 0.5,
+                           "durch Wärme (+30 K)" if d.get("stabil", True) else
+                           "durch Wärme (+30 K) – vorläufig: die Temperatur war noch nicht stabil, für einen "
+                           "verlässlichen Wert den Dauertest laufen lassen"))
     if d.get("bis_a"):
         kandidaten.append((d["bis_a"], "durch Spannungsabfall (750 mV)"))
     return min(kandidaten) if kandidaten else None
+
+
+def _min(s: float) -> str:
+    s = int(round(s))
+    return f"{s // 60}:{s % 60:02d} min"
 
 
 def bericht_html(d: dict) -> str:
@@ -82,6 +100,11 @@ def bericht_html(d: dict) -> str:
     else:
         z.append(f"<p>{html.escape(d['satz'])}</p>")
     tab = [("Widerstand Kabel", f"<b>{zahl(d['kabel_mohm'], 0)} mΩ</b> (Hin- und Rückleitung, Stecker eingerechnet)")]
+    b = d.get("bedingungen") or {}
+    if b:
+        from .fenster import dauer_text
+        tab.append(("Geprüft mit", f"höchstens <b>{zahl(b['max_w'], 1)} W</b> ({zahl(b['max_a'], 2)} A bei "
+                                   f"{zahl(b['bei_v'], 2)} V) · Dauer <b>{dauer_text(b['dauer_s'])}</b>"))
     if d.get("ohne_referenz"):
         tab.append(("", "<span style='color:#c77700'>ohne Referenzmessung – der Wert enthält auch den Widerstand "
                         "des Netzteils und ist daher etwas zu hoch</span>"))
@@ -145,9 +168,12 @@ def bericht_html(d: dict) -> str:
         z.append("<p><b>Je Spannung</b> (über den Trigger-Adapter)</p><table cellspacing=6><tr>"
                  "<td style='color:gray'>Spannung</td><td style='color:gray'>ohne Kabel</td>"
                  "<td style='color:gray'>mit Kabel</td><td style='color:gray'>Kabel</td>"
-                 "<td style='color:gray'>bis</td><td style='color:gray'>Stecker max.</td></tr>" + "".join(
+                 "<td style='color:gray'>bis</td><td style='color:gray'>Leistung</td>"
+                 "<td style='color:gray'>Dauer</td><td style='color:gray'>Stecker max.</td></tr>" + "".join(
                      f"<tr><td><b>{zahl(x[0], 0)} V</b></td><td>{zahl(x[1], 0) if x[1] is not None else '–'} mΩ</td>"
                      f"<td>{zahl(x[2], 0)} mΩ</td><td><b>{zahl(x[3], 0)} mΩ</b></td><td>{zahl(x[4], 2)} A</td>"
+                     f"<td>{zahl(x[6], 1) + ' W' if len(x) > 6 and x[6] else '–'}</td>"
+                     f"<td>{_min(x[7]) if len(x) > 7 and x[7] else '–'}</td>"
                      f"<td>{zahl(x[5], 1, '°C') if len(x) > 5 and x[5] is not None else '–'}</td></tr>"
                      for x in d["je_spannung"]) + "</table>")
         if d.get("fehlt"):
@@ -160,6 +186,60 @@ def bericht_html(d: dict) -> str:
     z.append("<p style='color:gray'>Der DL24 kann nicht auslesen, ob ein Kabel einen E-Marker hat (5 A) oder "
              "welche Datenleitungen es hat – geprüft wird nur, wie gut es Strom leitet.</p>")
     return "".join(z)
+
+
+def diagramm_bild(d: dict, breite: int = 900, hoehe: int = 520):
+    """Diagramm für den Bericht: eigens gezeichnet, hell, feste Größe - Spannung, Strom,
+    und Temperatur am Stecker, wenn gemessen. Nicht vom Bildschirm abfotografiert."""
+    k = d.get("kurve") or []
+    x = [p[0] / 60 for p in k]
+    w = pg.GraphicsLayoutWidget()
+    w.setBackground("w")
+    w.resize(breite, hoehe)
+    stift = pg.mkPen("k")
+    streifen = []
+    b_u = w.addPlot(row=0, col=0)
+    b_u.setLabel("left", "Spannung (V)")
+    b_u.plot(x, [p[1] for p in k], pen=pg.mkPen("#2f80ed", width=2))
+    streifen.append(b_u)
+    b_i = w.addPlot(row=1, col=0)
+    b_i.setLabel("left", "Strom (A)")
+    b_i.plot(x, [p[2] for p in k], pen=pg.mkPen("#2e9e4f", width=2))
+    b_i.setXLink(b_u)
+    streifen.append(b_i)
+    temp = [(a, p[3]) for a, p in zip(x, k) if len(p) > 3 and p[3] is not None]
+    if temp:
+        b_t = w.addPlot(row=2, col=0)
+        b_t.setLabel("left", "Stecker (°C)")
+        b_t.plot([a for a, _ in temp], [c for _, c in temp], pen=pg.mkPen("#d03b3b", width=2))
+        if d.get("temp_start") is not None:
+            grenze = pg.InfiniteLine(pos=d["temp_start"] + ERWAERMUNG_MAX_K, angle=0,
+                                     pen=pg.mkPen("#d03b3b", width=1, style=Qt.DashLine),
+                                     label="Grenze +30 K", labelOpts={"color": "#d03b3b", "position": 0.95})
+            b_t.addItem(grenze)
+        b_t.setXLink(b_u)
+        streifen.append(b_t)
+    w.ci.layout.setRowStretchFactor(0, 3)
+    for i, b in enumerate(streifen):
+        b.showGrid(x=True, y=True, alpha=0.3)
+        for achse in ("left", "bottom"):
+            a = b.getAxis(achse)
+            a.setPen(stift)
+            a.setTextPen(stift)
+            a.enableAutoSIPrefix(False)
+        b.getAxis("left").setWidth(60)
+        if i < len(streifen) - 1:
+            b.hideAxis("bottom")
+    streifen[-1].setLabel("bottom", "Zeit (min)")
+    if x:
+        b_u.setXRange(0, max(x), padding=0.01)
+    w.show()                       # Qt rechnet das Layout erst beim Zeigen
+    w.hide()
+    from PySide6.QtWidgets import QApplication
+    QApplication.processEvents()
+    bild = w.grab().toImage()
+    w.deleteLater()
+    return bild
 
 
 class KabelReiter(QWidget):
@@ -538,6 +618,7 @@ class KabelReiter(QWidget):
         d["pruef_a"] = self.strom.value()
         d["stabil"] = r.temp_stabil
         d["ref_name"] = self.ref_name.text().strip() if self._ref is not None else ""
+        d["bedingungen"] = bedingungen(ab.punkte)
         d.update(name=self.name.text().strip(), wann=time.time(), zu_heiss=r.zu_heiss,
                  kurve=[list(p) for p in nt.duennen(ab.punkte, 600)])
         self._zeigen(d)
@@ -588,8 +669,13 @@ class KabelReiter(QWidget):
             if ref and r0 is None:
                 fehlt.append(f"{v:g} V (keine Referenz)")
                 continue
+            st = t["ergebnis"].get("stufen") or []
+            if t["ergebnis"].get("dauer"):
+                st = st + [t["ergebnis"]["dauer"]]
+            max_w = max((s["spannung"] * s["strom"] for s in st), default=None)
             je.append((v, r0, ges, max(0.0, ges - (r0 or 0)), t["ergebnis"].get("max_getestet_a", 0),
-                       t["ergebnis"].get("temp_max")))
+                       t["ergebnis"].get("temp_max"), round(max_w, 1) if max_w else None,
+                       t["ergebnis"].get("dauer_s")))
         if not je:
             self.schritt.setText("Kein Wert – keine Spannung mit Referenz und Kabel gemessen.")
             self.f._zustand_zeigen()
@@ -604,6 +690,7 @@ class KabelReiter(QWidget):
         d["ref_mohm"] = d["gesamt_mohm"] - kabel
         d["stabil"] = any(t["ergebnis"].get("temp_stabil") for t in ab.ergebnis.teile)
         d["ref_name"] = self.ref_name.text().strip() if ref else ""
+        d["bedingungen"] = bedingungen(ab.punkte)
         d.update(name=self.name.text().strip(), wann=time.time(), je_spannung=je, fehlt=fehlt,
                  pruef_a=self.strom.value(), kurve=[list(p) for p in nt.duennen(ab.punkte, 900)])
         self._zeigen(d)
@@ -704,8 +791,10 @@ class KabelReiter(QWidget):
             if not pfad:
                 return None
         doc = QTextDocument()
-        doc.addResource(QTextDocument.ImageResource, QUrl("kurve.png"), self.bild.grab().toImage())
-        doc.setHtml(bericht_html(d) + "<p><img src='kurve.png' width='600'></p>")
+        doc.addResource(QTextDocument.ImageResource, QUrl("kurve.png"), diagramm_bild(d))
+        doc.setHtml(bericht_html(d) + "<p><b>Verlauf</b></p><p><img src='kurve.png' width='640'></p>"
+                    "<p style='color:gray'>Oben die Spannung am DL24, in der Mitte der Strom, unten die Temperatur "
+                    "am Stecker mit der Grenze der Norm (+30 K über der Starttemperatur).</p>")
         w = QPdfWriter(pfad)
         w.setPageSize(QPageSize(QPageSize.A4))
         w.setPageMargins(QMarginsF(15, 15, 15, 15), QPageLayout.Millimeter)
