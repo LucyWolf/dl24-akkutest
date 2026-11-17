@@ -359,6 +359,27 @@ def test_powerbank_ueberlast_dann_kapazitaet():
     assert any(a == "umschalten" and "Knopf" in t for a, t in ev)
 
 
+def test_kabel_herausrechnen_nur_wenn_gewaehlt():
+    # wie die INIU bei 5 V: Gerät selbst 12 mΩ, Kabel 114 mΩ - am Kabelende ab 2,7 A unter 4,75 V
+    q = SimNetzteil(5.0, innen_mohm=126, abschalt_a=9)
+    def lauf(raus):
+        e = nt.NetzteilEinstellung("INIU 5 V", 5.0, 3.0, stufen=5, stufe_s=10, dauertest=False,
+                                   kabel_mohm=114, kabel_raus=raus)
+        return durchspielen(q, e)[0].ergebnis
+    aus = lauf(False)
+    assert aus.urteil == "eingeschraenkt" and aus.stufen[-1].buchse_v is None, aus.gruende
+    an = lauf(True)
+    print("herausgerechnet:", an.urteil, an.gruende, an.stufen[-1].buchse_v)
+    assert an.urteil == "gut" and an.stufen[-1].ok and an.stufen[-1].buchse_v > 5.0, an.gruende
+    assert not any("Am Kabelende" in g for g in an.gruende)
+    import sys as _s
+    from akkutest.netzteil_reiter import ergebnis_html, messaufbau_html, geprueft_text
+    e = nt.NetzteilEinstellung("INIU 5 V", 5.0, 3.0, kabel_mohm=114, kabel_raus=True).__dict__
+    r = an.als_dict()
+    assert "herausgerechnet</b> (so gewählt)" in messaufbau_html(e, r)
+    assert "herausgerechnet" in geprueft_text(e, r) and "an der Buchse" in ergebnis_html(e, r, fach=True)
+
+
 def test_zu_hohe_spannung():
     q = SimNetzteil(5.6, innen_mohm=50, abschalt_a=9)
     e = nt.NetzteilEinstellung("Billig", 5.0, 1.0, stufen=2, stufe_s=10, dauertest=False, toleranz_proz=20)

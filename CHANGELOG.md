@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.43 – 17.11.2026
+
+- **Haken „Kabel herausrechnen“** (Netzteile und Powerbanks), standardmäßig
+  aus: Gesetzt wird an der Buchse des Geräts bewertet (gemessen + Strom ×
+  Kabelwiderstand) – Ampel, Urteil, Tabelle (Spalte „an der Buchse“) und
+  Kapazitätstest. Im Diagramm kommt die berechnete Buchsenspannung
+  gestrichelt dazu, die Grenzen bleiben fest. Der Bericht sagt ausdrücklich,
+  dass herausgerechnet wurde.
+- Erklärt das Kabel fast den ganzen Verlust, lautet der Hinweis jetzt
+  neutral: Das spricht für ein gutes Gerät; nur wenn das Kabel mit genau
+  diesem Gerät gemessen wurde, wäre es im Kreis gerechnet.
+
 ## 1.0.42 – 17.11.2026
 
 - **Powerbank: „Was prüfen?“ als Auswahl** statt des Hakens beim

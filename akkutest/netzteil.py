@@ -113,6 +113,7 @@ class NetzteilEinstellung:
     kapazitaet: bool = False  # bis leer entladen und Energie messen
     kap_a: float = 1.0
     nenn_mah_aus: float = 0.0  # "Rated capacity" vom Aufdruck: was neu am Ausgang (5 V) herauskommt
+    kabel_raus: bool = False   # vom Nutzer gewählt: Kabel herausrechnen, bewertet wird an der Buchse
 
     @property
     def neu_wh(self) -> tuple[float, bool]:
@@ -432,10 +433,10 @@ def bewerten(e: NetzteilEinstellung, r: NetzteilErgebnis) -> None:
     """Klare Aussage: empfehlenswert, eingeschränkt, nicht verwenden - oder
     offen, wenn das Kabel nicht herausgerechnet ist. Getrennt davon: liefert
     es den versprochenen Strom?"""
-    # Nichts herausrechnen: bewertet wird, was am Kabelende beim Gerät ankommt. Dann passen
-    # Diagramm (feste Grenzlinien) und Urteil immer zusammen; das Kabel wird eigens bewertet.
-    kabel = 0.0
-    an_buchse = lambda st, v: v
+    # Standard: nichts herausrechnen - bewertet wird, was am Kabelende beim Gerät ankommt.
+    # Nur wenn ausdrücklich gewählt, gilt die Spannung an der Buchse (gemessen + Strom × Kabel).
+    kabel = e.kabel_mohm / 1000 if e.kabel_raus else 0.0
+    an_buchse = lambda st, v: v + st.strom * kabel
     bis_nenn = [x for x in r.stufen if x.soll_a <= e.strom_a + 1e-6]
     if r.dauer:
         bis_nenn.append(r.dauer)
@@ -455,7 +456,8 @@ def bewerten(e: NetzteilEinstellung, r: NetzteilErgebnis) -> None:
                          and e.kabel_mohm >= 0.9 * r.widerstand_mohm - 5)
     if r.kabel_kreis:
         gruende.append(f"Kabelwert {_k(e.kabel_mohm, 0)} mΩ erklärt fast den ganzen gemessenen Widerstand "
-                       f"({_k(r.widerstand_mohm, 0)} mΩ) – wurde das Kabel mit diesem Netzteil gemessen?")
+                       f"({_k(r.widerstand_mohm, 0)} mΩ) – entweder ist das Gerät selbst sehr gut, oder das Kabel "
+                       "wurde mit genau diesem Gerät gemessen (dann im Kreis gerechnet)")
     if r.kabel_unplausibel:
         gruende.append(f"Kabelwert {_k(e.kabel_mohm, 0)} mΩ ist größer als der gesamte gemessene Widerstand "
                        f"({_k(r.widerstand_mohm, 0)} mΩ) – nicht herausgerechnet")
@@ -501,11 +503,11 @@ def bewerten(e: NetzteilEinstellung, r: NetzteilErgebnis) -> None:
                 pass
             elif tiefst < USB_SCHWACH_V:
                 schlimm = r.spez_verletzt = True
-                gruende.append(f"Am Kabelende {_k(tiefst)} V bei Nennstrom – unter {_k(USB_MIN_V)} V und sogar "
+                gruende.append(f"{'An der Buchse' if kabel else 'Am Kabelende'} {_k(tiefst)} V bei Nennstrom – unter {_k(USB_MIN_V)} V und sogar "
                                f"unter {_k(USB_SCHWACH_V)} V ({SPEZ} §7.2.2)")
             else:
                 knapp = r.spez_verletzt = True
-                gruende.append(f"Am Kabelende {_k(tiefst)} V bei Nennstrom – unter {_k(USB_MIN_V)} V "
+                gruende.append(f"{'An der Buchse' if kabel else 'Am Kabelende'} {_k(tiefst)} V bei Nennstrom – unter {_k(USB_MIN_V)} V "
                                f"({SPEZ} §7.2.2)")
         elif tiefst is not None:
             wo = "an der Buchse" if kabel else "am Kabelende"
@@ -520,7 +522,7 @@ def bewerten(e: NetzteilEinstellung, r: NetzteilErgebnis) -> None:
                 r.spez_verletzt = r.spez_verletzt or e.pd
                 gruende.append(f"Spannung fällt bis zum Nennstrom auf {_k(tiefst)} V {wo} – unter der Toleranz "
                                f"({_k(e.untere_v)} V{quelle})")
-    if e.kabel_mohm and tiefst is not None and tiefst < (USB_MIN_V if e.usb else e.untere_v):
+    if not kabel and e.kabel_mohm and tiefst is not None and tiefst < (USB_MIN_V if e.usb else e.untere_v):
         gruende.append(f"Davon entfallen bei {_k(e.strom_a)} A etwa {_k(e.strom_a * e.kabel_mohm, 0)} mV auf das "
                        f"Kabel ({_k(e.kabel_mohm, 0)} mΩ) – ein besseres Kabel hebt die Spannung entsprechend")
     if r.zu_heiss:
@@ -563,10 +565,11 @@ def bewerten(e: NetzteilEinstellung, r: NetzteilErgebnis) -> None:
         # Hält sie die Spannung beim Entladen? Die letzte Minute vor dem Abschalten zählt nicht
         if e.kapazitaet and r.kap_min_v is not None:
             rot_u, gelb_u, _, _ = e.grenzen()
-            if r.kap_min_v < rot_u:
+            r.kap_min_v = round(r.kap_min_v, 3)
+            if r.kap_min_v + max(e.kap_a, e.mindest_a) * kabel < rot_u:
                 schlimm = True
                 gruende.append(f"Beim Entladen fiel die Spannung auf {_k(r.kap_min_v)} V – unter {_k(rot_u)} V")
-            elif r.kap_min_v < gelb_u:
+            elif r.kap_min_v + max(e.kap_a, e.mindest_a) * kabel < gelb_u:
                 knapp = True
                 gruende.append(f"Beim Entladen fiel die Spannung auf {_k(r.kap_min_v)} V – unter {_k(gelb_u)} V")
         if e.kapazitaet and r.autoaus:
@@ -642,9 +645,10 @@ def pb_saetze(e: NetzteilEinstellung, r: NetzteilErgebnis) -> list[str]:
                  "Powerbank lässt sich nicht vergleichen.")
     if r.kap_min_v is not None:
         rot_u, gelb_u, _, _ = e.grenzen()
-        if r.kap_min_v >= gelb_u:
+        zu = max(e.kap_a, e.mindest_a) * e.kabel_mohm / 1000 if e.kabel_raus else 0.0
+        if r.kap_min_v + zu >= gelb_u:
             s.append(f"Die Spannung blieb beim Entladen bis kurz vor leer im erlaubten Bereich (tiefster Wert "
-                     f"{_k(r.kap_min_v)} Volt).")
+                     f"{_k(r.kap_min_v + zu)} Volt{' an der Buchse' if zu else ''}).")
         else:
             s.append(f"Beim Entladen fiel die Spannung schon vor dem Ende auf {_k(r.kap_min_v)} Volt – unter "
                      f"{_k(gelb_u)} Volt. Angeschlossene Geräte laden dann langsamer oder brechen ab.")
@@ -663,7 +667,7 @@ def laien_saetze(e: NetzteilEinstellung, r: NetzteilErgebnis, tiefst: float | No
     """Für Leute ohne Fachwissen: was heißt das Ergebnis im Alltag?"""
     art = "das Gerät"
     versprochen_w = e.nenn_v * e.strom_a
-    kabel = False   # nichts herausgerechnet
+    kabel = bool(e.kabel_raus and e.kabel_mohm) and not r.kabel_unplausibel
     s: list[str] = []
     if e.unbekannt:
         if r.max_w_tol:
@@ -684,7 +688,7 @@ def laien_saetze(e: NetzteilEinstellung, r: NetzteilErgebnis, tiefst: float | No
                      f"{_k(USB_MIN_V)} Volt ({'an der Buchse' if kabel else 'gemessen'}: {_k(tiefst)} Volt). Angeschlossene Geräte werden "
                      "zuverlässig versorgt.")
         else:
-            s.append(f"Unter Last kommen am Ende des Kabels nur {_k(tiefst)} Volt an. Die {SPEZ} verlangt mindestens "
+            s.append(f"Unter Last {'liegen an der Buchse (Kabel herausgerechnet)' if kabel else 'kommen am Ende des Kabels'} nur {_k(tiefst)} Volt an. Die {SPEZ} verlangt mindestens "
                      f"{_k(USB_MIN_V)} Volt. Das Gerät entspricht damit nicht den Vorgaben für die Spannung.")
             if tiefst < USB_SCHWACH_V:
                 s.append("Angeschlossene Geräte können sich deshalb abschalten, abstürzen oder laden nicht "
@@ -707,9 +711,9 @@ def laien_saetze(e: NetzteilEinstellung, r: NetzteilErgebnis, tiefst: float | No
                  "Gerät – dann würde er dessen eigene Schwäche dem Kabel zuschreiben. Er wurde deshalb nicht "
                  "herausgerechnet.")
     if r.kabel_kreis:
-        s.append("Hinweis: Der eingetragene Kabelwert erklärt fast den ganzen Spannungsverlust. Wurde das Kabel mit "
-                 "genau diesem Netzteil gemessen, ist das Ergebnis im Kreis gerechnet und sagt über das Netzteil "
-                 "nichts aus. Dann das Kabel mit einem anderen Ladegerät messen und noch einmal prüfen.")
+        s.append("Hinweis: Fast der ganze Spannungsverlust entfällt auf das Kabel – das Gerät selbst verliert "
+                 "kaum etwas. Das spricht für ein gutes Gerät. Nur falls das Kabel mit genau diesem Gerät gemessen "
+                 "wurde, wäre das im Kreis gerechnet; dann das Kabel an einem anderen Ladegerät messen.")
     if r.unter_ab_a is not None and not e.unbekannt:
         rot_u, gelb_u, _, _ = e.grenzen()
         ueber = " – also schon unterhalb der Angabe" if r.unter_ab_a < e.strom_a - 1e-6 else (
@@ -1051,10 +1055,11 @@ class NetzteilAblauf:
         i = sum(x.strom for x in w) / len(w)
         tief = min(x.spannung for x in w)
         hoch = max(x.spannung for x in w)
-        kabel = 0.0            # nicht herausgerechnet - bewertet wird, was beim Gerät ankommt
+        # nur wenn gewählt: was im Kabel verloren geht, zählt zur Spannung an der Buchse
+        kabel = i * e.kabel_mohm / 1000 if e.kabel_raus else 0.0
         sw = StufenWert(s.soll_a, round(v, 3), round(tief, 3), round(i, 3),
                         ok=tief + kabel >= e.grenzen()[1],
-                        buchse_v=None,
+                        buchse_v=round(v + kabel, 3) if kabel else None,
                         max_v=round(hoch, 3))
         if s.art == "dauer":
             self.ergebnis.dauer = sw

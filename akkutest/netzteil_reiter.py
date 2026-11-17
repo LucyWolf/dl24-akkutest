@@ -102,8 +102,14 @@ def messaufbau_html(e: dict, r: dict) -> str:
         wann = e.get("kabel_wann")
         woher = (f"gemessen am {datetime.fromtimestamp(wann):%d.%m.%Y um %H:%M} Uhr an einem guten Ladegerät"
                  if wann else "von Hand eingetragen")
-        zeilen.append(("Widerstand Kabel + Adapter", f"{k:.0f} mΩ ({woher}) – nicht herausgerechnet: bewertet "
-                                                     "wird die Spannung am Kabelende, also beim Gerät"))
+        if e.get("kabel_raus"):
+            zeilen.append(("Widerstand Kabel + Adapter", f"{k:.0f} mΩ ({woher}) – <b>herausgerechnet</b> (so "
+                                                         "gewählt): bewertet wird die Spannung an der Buchse des "
+                                                         "Geräts = gemessene Spannung + Strom × Kabelwiderstand. "
+                                                         "Beim angeschlossenen Gerät kommt entsprechend weniger an."))
+        else:
+            zeilen.append(("Widerstand Kabel + Adapter", f"{k:.0f} mΩ ({woher}) – nicht herausgerechnet: bewertet "
+                                                         "wird die Spannung am Kabelende, also beim Gerät"))
     elif k:
         zeilen.append(("Widerstand Kabel + Adapter", f"{k:.0f} mΩ eingetragen, aber unplausibel (größer als der "
                                                      "gesamte gemessene Widerstand) – nicht herausgerechnet"))
@@ -139,7 +145,10 @@ def geprueft_text(e: dict, r: dict) -> str:
     text = (f"Das Gerät wurde mit einer elektronischen Last (Atorch DL24) Schritt für Schritt stärker belastet – "
             f"von {zahl(lo)} bis {zahl(hi)} Ampere – und dabei wurde gemessen, wie viel Spannung noch ankommt. "
             "Ein gutes Netzteil hält die Spannung auch unter Last fast gleich.")
-    if e.get("kabel_mohm"):
+    if e.get("kabel_mohm") and e.get("kabel_raus") and not r.get("kabel_unplausibel"):
+        text += (f" Gemessen wurde am Ende des Kabels. Der Verlust im Kabel ({e['kabel_mohm']:.0f} mΩ) wurde auf "
+                 "Wunsch herausgerechnet – die Bewertung gilt für die Spannung an der Buchse.")
+    elif e.get("kabel_mohm"):
         text += (f" Gemessen wurde am Ende des Kabels ({e['kabel_mohm']:.0f} mΩ), also so, wie es beim Gerät "
                  "ankommt – der Verlust im Kabel ist darin enthalten.")
     return text
@@ -283,7 +292,8 @@ def ergebnis_html(e: dict, r: dict, fach: bool = False) -> str:
                "<td style='color:gray'>Leistung</td><td></td></tr>"
         ee = einstellung_aus(e)
         rot_u, gelb_u, gelb_o, rot_o = ee.grenzen()
-        kabel = 0.0     # wie im Urteil: bewertet wird die Spannung am Kabelende
+        # wie im Urteil: am Kabelende - oder an der Buchse, wenn das Herausrechnen gewählt ist
+        kabel = (e.get("kabel_mohm") or 0) / 1000 if e.get("kabel_raus") and not r.get("kabel_unplausibel") else 0.0
 
         def zustand(s: dict) -> str:
             v = s["min_v"] + s["strom"] * kabel
@@ -469,6 +479,13 @@ class NetzteilReiter(QWidget):
         self.kabel.setValue(float(self._einst.value("kabel/mohm", 0) or 0))
         self.kabel.valueChanged.connect(self._kabel_merken)
         self.kabel_name.textChanged.connect(self._kabel_merken)
+        self.kabel_raus = QCheckBox("Kabel herausrechnen – bewerten an der Buchse des Geräts")
+        self.kabel_raus.setToolTip("Aus: bewertet wird, was am Ende des Kabels ankommt (so, wie es ein Gerät "
+                                   "bekommt).\nAn: zur gemessenen Spannung wird Strom × Kabelwiderstand "
+                                   "dazugerechnet – bewertet wird das Gerät allein. Steht so auch im Bericht.")
+        self.kabel_raus.setChecked(str(self._einst.value("kabel/raus", "false")).lower() == "true")
+        self.kabel_raus.toggled.connect(lambda an: (self._einst.setValue("kabel/raus", an), self._angabe_zeigen()))
+        f.addRow(self.kabel_raus)
         self._kabel_urteil_zeigen()
         self.schnell = QCheckBox("Schnellladegerät (USB-PD / QC / Fast Charging)")
         self.schnell.setToolTip("9 V, 12 V, 15 V, 20 V gibt das Ladegerät nur über einen Trigger-Adapter heraus")
@@ -664,6 +681,9 @@ class NetzteilReiter(QWidget):
         self.bild.setLabel("left", "Spannung (V)")
         self.legende = self.bild.addLegend(offset=(-10, 10))
         self.linie = self.bild.plot([], [], pen=pg.mkPen("#2f80ed", width=2), name="gemessen (am DL24)")
+        # nur wenn "Kabel herausrechnen" gewählt: berechnete Spannung an der Buchse
+        self.linie_buchse = self.bild.plot([], [], pen=pg.mkPen("#2f80ed", width=1.5, style=Qt.DashLine))
+        self._buchse_r = 0.0
         # Mit Kabelwert: die Grenzen ans Kabelende umgerechnet (Grenze minus Kabelverlust) -
         # dann liest man an der gemessenen Kurve direkt ab, ob das Netzteil reicht
         self.linie_b = self.bild.plot([], [], pen=pg.mkPen("#c77700", width=2, style=Qt.DashLine))
@@ -977,7 +997,9 @@ class NetzteilReiter(QWidget):
             fuehler=self.mit_fuehler.isChecked(), hub=self._ist_hub(),
             bis_ende=self.bis_ende.isChecked(), kabel_mohm=self.kabel.value(),
             kabel_name=self.kabel_name.text().strip(), kabel_wann=self._kabel_wann,
-            kabel_typ=self.kabel_typ.currentData() or "")
+            kabel_typ=self.kabel_typ.currentData() or "",
+            kabel_raus=bool(getattr(self, "kabel_raus", None) and self.kabel_raus.isChecked()
+                            and self.kabel.value() > 0))
 
     def _unbekannt_umschalten(self, an: bool) -> None:
         if an:
@@ -1117,6 +1139,8 @@ class NetzteilReiter(QWidget):
         self._kabel_urteil_zeigen()
 
     def _kabel_urteil_zeigen(self) -> None:
+        if hasattr(self, "kabel_raus"):
+            self.kabel_raus.setEnabled(self.kabel.value() > 0 and not self.laeuft)
         b = nt.kabel_bewerten(self.kabel.value(), self.kabel_typ.currentData())
         if not b:
             self.kabel_urteil.setText("")
@@ -1240,6 +1264,9 @@ class NetzteilReiter(QWidget):
                 b.hide()
             self.grenze.hide()
             self._kabel_ohm = 0.0
+            if self._buchse_r:
+                self.legende.removeItem(self.linie_buchse)
+            self._buchse_r = 0.0
             self.bild.setLabel("left", "Spannung (V)")
             self.legende.removeItem(self.linie_b)
             self.legende.removeItem(self.linie_r)
@@ -1253,6 +1280,12 @@ class NetzteilReiter(QWidget):
         self.grenze.setValue(gelb_u)
         self.grenze.show()
         self._kabel_ohm = 0.0   # Grenzen fest - nichts ans Kabelende umrechnen
+        neu_r = e.kabel_mohm / 1000 if e.kabel_raus else 0.0
+        if neu_r and not self._buchse_r:
+            self.legende.addItem(self.linie_buchse, "an der Buchse (Kabel herausgerechnet)")
+        elif self._buchse_r and not neu_r:
+            self.legende.removeItem(self.linie_buchse)
+        self._buchse_r = neu_r
         self._gelb_u, self._rot_u = gelb_u, rot_u
         self.bild.setLabel("left", "Spannung (V)")
         self.legende.removeItem(self.linie_b)
@@ -1266,6 +1299,12 @@ class NetzteilReiter(QWidget):
         gemessen = [p[1] for p in punkte]
         self.linie.setData(x, gemessen)
         v = list(gemessen)
+        if self._buchse_r and punkte:
+            buchse = [p[1] + p[2] * self._buchse_r for p in punkte]
+            self.linie_buchse.setData(x, buchse)
+            v += [b for b, p in zip(buchse, punkte) if p[2] > 0.01]
+        else:
+            self.linie_buchse.setData([], [])
         self.linie_b.setData([], [])
         self.linie_r.setData([], [])
         self.kabel_warnung.hide()
