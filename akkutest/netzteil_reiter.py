@@ -280,6 +280,8 @@ def ergebnis_html(e: dict, r: dict, fach: bool = False) -> str:
         tab.append(("Temperatur", t))
     elif e.get("fuehler", True):
         tab.append(("Temperatur", "– (kein Fühler am DL24)"))
+    else:
+        tab.append(("Temperatur", "nicht gemessen (Fühler abgewählt)"))
     tab.append(("Dauer", dauer_text(r.get("dauer_s", 0))))
     tab.append(("Ende", html.escape(r.get("grund", ""))))
     zeilen.append("<table cellspacing=4>" + "".join(
@@ -512,9 +514,15 @@ class NetzteilReiter(QWidget):
         self.kabel.valueChanged.connect(self._kabel_merken)
         self.kabel_name.textChanged.connect(self._kabel_merken)
         self.kabel_raus = QCheckBox("Kabel herausrechnen – bewerten an der Buchse des Geräts")
-        self.kabel_raus.setToolTip("Aus: bewertet wird, was am Ende des Kabels ankommt (so, wie es ein Gerät "
-                                   "bekommt).\nAn: zur gemessenen Spannung wird Strom × Kabelwiderstand "
-                                   "dazugerechnet – bewertet wird das Gerät allein. Steht so auch im Bericht.")
+        geraet = "der Powerbank" if self.powerbank else "des Netzteils"
+        self.kabel_raus.setToolTip(
+            f"„Buchse“ heißt hier: die Ausgangsbuchse {geraet} – dort, wo das Kabel am geprüften Gerät steckt.\n"
+            "Nicht gemeint sind die Buchse am DL24 und der Anschluss für den Temperaturfühler.\n\n"
+            "Aus: bewertet wird, was am Ende des Kabels beim DL24 ankommt (so, wie es ein angeschlossenes Gerät "
+            "bekommt).\n"
+            f"An: zur gemessenen Spannung wird Strom × Kabelwiderstand dazugerechnet – das ergibt die Spannung an "
+            f"der Ausgangsbuchse {geraet}. Bewertet wird dann das Gerät allein, ohne Kabel.\n"
+            "Steht so auch im Bericht.")
         self.kabel_raus.setChecked(str(self._einst.value("kabel/raus", "false")).lower() == "true")
         self.kabel_raus.toggled.connect(lambda an: (self._einst.setValue("kabel/raus", an), self._angabe_zeigen()))
         f.addRow(self.kabel_raus)
@@ -614,7 +622,7 @@ class NetzteilReiter(QWidget):
         f.addWidget(self.mit_fuehler, 4, 0)
         self.temp_grenze = QSpinBox()
         self.temp_grenze.setRange(30, 120)
-        self.temp_grenze.setValue(70)
+        self.temp_grenze.setValue(50)
         self.temp_grenze.setSuffix(" °C")
         self.temp_grenze.setToolTip("Gilt für den Temperaturfühler des DL24 - am Netzteil festkleben")
         f.addWidget(self.temp_grenze, 4, 1)
@@ -626,6 +634,12 @@ class NetzteilReiter(QWidget):
         self.fuehler_hinweis = hinweis
         hinweis.hide()
         self.temp_grenze.setEnabled(False)
+        # Fühler und Grenze bleiben über den Programmstart hinaus so, wie zuletzt eingestellt
+        schl = f"{self.kennung}/"
+        self.temp_grenze.setValue(int(float(self._einst.value(schl + "temp_grenze", 50) or 50)))
+        self.mit_fuehler.setChecked(str(self._einst.value(schl + "fuehler", "false")).lower() == "true")
+        self.mit_fuehler.toggled.connect(lambda an: self._einst.setValue(schl + "fuehler", an))
+        self.temp_grenze.valueChanged.connect(lambda w: self._einst.setValue(schl + "temp_grenze", w))
         self.dauer = QLabel()
         f.addWidget(self.dauer, 6, 0, 1, 3)
         knoepfe = QHBoxLayout()
@@ -1377,7 +1391,10 @@ class NetzteilReiter(QWidget):
         if self._nenn_v and v:
             # bei Schnellladen nur die aktuelle Spannung - sonst reicht die Achse von 5 bis 20 V
             if self._teil_ab and len(punkte) > self._teil_ab:
-                v = [p[1] for p in punkte[self._teil_ab:]]
+                teil = punkte[self._teil_ab:]
+                v = [p[1] for p in teil]
+                if self._buchse_r:          # die gestrichelte Buchsen-Kurve muss auch ins Bild
+                    v += [p[1] + p[2] * self._buchse_r for p in teil if p[2] > 0.01]
             gut = [u for u in v if u >= self._nenn_v * nt.ZUSAMMENBRUCH] or v
             lo, hi = min(gut), max(gut)
             if self.grenze.isVisible():
@@ -1472,7 +1489,12 @@ class NetzteilReiter(QWidget):
             r = getattr(self, "_angezeigt", (None, {}))[1] or {}
             self.anz["r"].setzen(f"{r['widerstand_mohm']:.0f} mΩ" if r.get("widerstand_mohm") else "–")
         if not self.mit_fuehler.isChecked():
-            self.anz["t"].setzen("aus")
+            # Fühler steckt, wird aber nicht ausgewertet - sonst fehlt die Temperatur später im Bericht
+            steckt = m.temp_fuehler is not None
+            self.anz["t"].setzen("aus ⚠" if steckt else "aus")
+            self.anz["t"].setToolTip("Der Fühler steckt, wird aber nicht ausgewertet – unten bei den Tests den Haken "
+                                     "„Temperaturfühler“ setzen, sonst fehlt die Temperatur im Bericht."
+                                     if steckt else "")
         else:
             self.anz["t"].setzen(zahl(m.temp_fuehler, 1, "°C") if m.temp_fuehler is not None else "kein Fühler")
         ab = self.ablauf

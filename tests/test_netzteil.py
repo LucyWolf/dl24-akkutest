@@ -126,7 +126,7 @@ def trigger_durchspielen(q, basis, stufen, kann, tempo=200, frist=90):
 
 def test_schnellladen_mit_trigger():
     q = SimNetzteil(5.0, innen_mohm=100, abschalt_a=3.3)
-    basis = nt.NetzteilEinstellung("PD-Lader", 5.0, 0, stufen=3, stufe_s=10, dauertest=False)
+    basis = nt.NetzteilEinstellung("PD-Lader", 5.0, 0, stufen=3, stufe_s=10, dauertest=False, temp_grenze=90)
     ab, ev = trigger_durchspielen(q, basis, [(5.0, 3.0), (9.0, 0), (12.0, 0), (15.0, 0)], kann={9.0, 12.0})
     r = ab.ergebnis
     print("PD:", r.grund, [(t["einstellung"]["nenn_v"], t["ergebnis"]["haelt"], nt.bestleistung(t["ergebnis"]))
@@ -420,7 +420,7 @@ def test_zu_hohe_spannung():
 def test_maximum_suchen():
     q = SimNetzteil(5.0, innen_mohm=60, abschalt_a=3.8)
     e = nt.NetzteilEinstellung("Lader", 5.0, 2.0, stufen=4, stufe_s=10, dauertest=False,
-                               abschalttest=True, bis_ende=True)
+                               abschalttest=True, bis_ende=True, temp_grenze=90)   # hier geht es nicht um Wärme
     assert e.hoechster_strom() == 5.0 and nt.plan(e)[-1].soll_a == 5.0
     r = durchspielen(q, e)[0].ergebnis
     print("Maximum:", r.grund, r.max_w, r.max_w_tol)

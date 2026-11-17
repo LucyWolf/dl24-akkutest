@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.46 – 17.11.2026
+
+- **Gestrichelte Buchsen-Kurve bleibt im Bild:** Beim Schnellladen wurde die
+  Spannungsachse je Spannung nur nach der gemessenen Kurve gesetzt – mit
+  „Kabel herausrechnen“ verschwand die berechnete Linie nach oben.
+- **Temperatur:** Grenze für den Fühler jetzt 50 °C statt 70 °C. Haken und
+  Grenze bleiben über den Programmstart hinaus gespeichert (Netzteile und
+  Powerbanks getrennt). Steckt ein Fühler, ist der Haken aber aus, zeigt die
+  Anzeige „aus ⚠“. Im Bericht steht dann „nicht gemessen (Fühler abgewählt)“
+  statt gar nichts.
+- **Hinweis am Haken „Kabel herausrechnen“:** „Buchse“ ist die Ausgangsbuchse
+  des Netzteils bzw. der Powerbank – nicht die Buchse am DL24 oder der
+  Fühleranschluss.
+
 ## 1.0.45 – 17.11.2026
 
 - **Vorlage „TZT/CKCS PD65W Step-Down-Modul (Eingang 8–30 V)“** bei den

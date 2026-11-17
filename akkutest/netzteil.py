@@ -101,7 +101,7 @@ class NetzteilEinstellung:
     dauer_min: float = 10.0
     abschalttest: bool = False
     max_proz: float = 130.0
-    temp_grenze: float = 70.0
+    temp_grenze: float = 50.0
     trigger: list = field(default_factory=list)   # [[V, A], …] bei Schnellladegeräten
     unbekannt: bool = False   # Strom unbekannt: Leistung ermitteln statt Angabe prüfen
     bis_ende: bool = False    # Abschalttest bis zum Abschalten (höchstens 5 A bei USB / 150 W)

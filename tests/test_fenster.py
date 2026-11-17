@@ -194,6 +194,7 @@ def test_unbekanntes_format_bleibt_verbunden():
 
 
 def test_netzteil_reiter():
+    from akkutest import netzteil as nt_mod
     geraet.HID_INTERVALL = 0.02
     SimulatorVerbindung.voreinstellung = {"tempo": 50}
     sp = Speicher()
@@ -323,6 +324,15 @@ def test_netzteil_reiter():
     assert f.nt.bild_t.getAxis("bottom").isVisible() and not f.nt.bild_k.getAxis("bottom").isVisible()
     warten(lambda: False, 0.3)
     foto(f, "13-kabelverlust")
+    # Kabel herausgerechnet: auch beim Schnellladen (eigene Achse je Spannung) bleibt die Buchsen-Kurve im Bild
+    f.nt._grenzen_zeigen(nt_mod.trigger_einstellung(nt_mod.NetzteilEinstellung("T", 5.0, 3.0, kabel_mohm=114,
+                                                                               kabel_raus=True), 5.0, 3.0))
+    f.nt._nenn_v, f.nt._teil_ab = 5.0, 1
+    f.nt._kurven([(0, 9.0, 0.0, None), (10, 5.06, 0.3, None), (20, 4.78, 2.7, None)])
+    oben = f.nt.bild.viewRange()[1][1]
+    assert oben > 4.78 + 2.7 * 0.114, (oben, f.nt.bild.viewRange())
+    f.nt._teil_ab = 0
+    f.nt._grenzen_zeigen(None)
     # Maus darf die Ansicht nicht verstellen
     assert not any(f.nt.bild.vb.state["mouseEnabled"]) and not any(f.nt.bild_i.vb.state["mouseEnabled"])
     f.nt.bild_i.vb.disableAutoRange()
