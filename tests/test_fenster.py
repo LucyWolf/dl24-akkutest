@@ -291,6 +291,16 @@ def test_netzteil_reiter():
     assert not f.geraet.v.geraet.an
     marken = [x.label.toPlainText() for x in f.nt._marken]
     assert marken[:4] == ["0,50 A", "1,00 A", "1,50 A", "2,00 A"] and marken[4] == "↑ 2,10 A", marken
+    # Diagramm und Ergebnis dürfen sich nicht überlappen - auch mit allen Streifen in einem kleinen Fenster
+    f.resize(1280, 800)
+    f.nt._kabel_r = 0.137
+    f.nt._kurven([(0, 5.06, 0.0, 22.0), (10, 4.9, 1.0, 23.0), (20, 4.75, 2.0, 24.0)])
+    f.nt.ergebnis_rahmen.show()
+    warten(lambda: False, 0.3)
+    fl, er = f.nt.flaeche.geometry(), f.nt.ergebnis_rahmen.geometry()
+    assert f.nt.flaeche.parent() is f.nt.ergebnis_rahmen.parent() and fl.bottom() < er.top(), (fl, er)
+    f.nt._kabel_r = 0.0
+    f.resize(1280, 900)
     foto(f, "8-netzteil-ergebnis")
     # gespeichert und in der Liste
     alle = sp.netzteil_tests()

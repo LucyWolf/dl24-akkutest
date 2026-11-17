@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.50 – 17.11.2026
+
+- **Diagramm und Ergebnis überlappen nicht mehr:** Mit Kabelverlust- und
+  Temperaturstreifen passte beides nicht mehr ins Fenster und lag
+  übereinander. Jetzt teilen sie sich den Platz über einen verschiebbaren
+  Teiler; die Mindesthöhe des Diagramms wächst nur mit den Streifen.
+
 ## 1.0.49 – 17.11.2026
 
 - **Bericht bei „unbekannt – ermitteln“:** Statt „Bei 15 Volt: . Auf dem

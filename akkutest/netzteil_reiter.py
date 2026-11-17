@@ -742,7 +742,7 @@ class NetzteilReiter(QWidget):
         # Spannung · Strom und Leistung · Temperatur (nur mit Fühler)
         self.flaeche = pg.GraphicsLayoutWidget()
         self.flaeche.setBackground(None)
-        self.flaeche.setMinimumHeight(380)
+        self.flaeche.setMinimumHeight(260)
         self.bild = self.flaeche.addPlot(row=0, col=0)
         self.bild.setLabel("left", "Spannung (V)")
         self.legende = self.bild.addLegend(offset=(-10, 10))
@@ -825,7 +825,12 @@ class NetzteilReiter(QWidget):
         lay = self.flaeche.ci.layout
         lay.setRowStretchFactor(0, 3)
         lay.setRowStretchFactor(1, 2)
-        ol.addWidget(self.flaeche, 1)
+        # Diagramm und Ergebnis teilen sich den Platz über einen Teiler - mit vielen Streifen
+        # (Kabelverlust, Temperatur) überlappten sie sonst, wenn das Fenster nicht hoch genug war
+        self.teiler = QSplitter(Qt.Vertical)
+        self.teiler.setChildrenCollapsible(False)
+        self.teiler.addWidget(self.flaeche)
+        ol.addWidget(self.teiler, 1)
         self.ergebnis = QLabel()
         self.ergebnis.setWordWrap(True)
         self.ergebnis.setTextFormat(Qt.RichText)
@@ -837,10 +842,12 @@ class NetzteilReiter(QWidget):
         self.ergebnis_rahmen.setWidgetResizable(True)
         self.ergebnis_rahmen.setFrameShape(QFrame.NoFrame)
         self.ergebnis_rahmen.setWidget(self.ergebnis)
-        self.ergebnis_rahmen.setMinimumHeight(220)
+        self.ergebnis_rahmen.setMinimumHeight(90)
         self.ergebnis_rahmen.hide()
         self.ergebnis.hide()
-        ol.addWidget(self.ergebnis_rahmen, 1)
+        self.teiler.addWidget(self.ergebnis_rahmen)
+        self.teiler.setStretchFactor(0, 3)
+        self.teiler.setStretchFactor(1, 1)
         rechts.addWidget(oben)
 
         unten = QWidget()
@@ -1463,7 +1470,7 @@ class NetzteilReiter(QWidget):
                 b.setLabel("bottom", "")
                 b.hideAxis("bottom")
         self.box_k.setVisible(kabel)
-        self.flaeche.setMinimumHeight(380 + 100 * kabel)
+        self.flaeche.setMinimumHeight(260 + 60 * kabel + 60 * temp)
         # die zweite Skala sitzt erst richtig, wenn der Streifen Platz bekommen hat
         QTimer.singleShot(0, lambda: self.box_k.setGeometry(self.bild_k.vb.sceneBoundingRect()))
         self._mit_kabel, self._mit_temp = kabel, temp
