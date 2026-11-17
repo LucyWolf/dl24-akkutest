@@ -112,8 +112,38 @@ def test_sicherung_zu_viel_strom():
     assert not sim.an
 
 
+
+def test_sicherung_nach_herunterstellen():
+    # Strom heruntergestellt, Berichte zeigen noch kurz den alten Wert: das ist kein Fehler.
+    # Bleibt es dabei, greift die Sicherung trotzdem.
+    import akkutest.geraet as gm
+    v = verbindung.oeffnen(verbindung.hid_anschluesse()[0])
+    g = Geraet(v, intervall=0.05)
+    g.antwortzeit = 0.2
+    assert g.erkennen() == "hid"
+    sim = v._d.sim
+    fehler = []
+    g.bei_fehler = fehler.append
+    g.strom_setzen(1.4)
+    g.last(True)
+    g.strom_setzen(0.3)
+    sim.soll_a = 1.4                     # das Gerät hat den neuen Wert noch nicht übernommen
+    alt, gm.SOLL_NACHLAUF_S = gm.SOLL_NACHLAUF_S, 0.8
+    try:
+        g.starten()
+        time.sleep(0.5)
+        assert not fehler and sim.an, fehler            # innerhalb der Nachlaufzeit: kein Alarm
+        time.sleep(0.8)
+        assert fehler and "Sicherheitsabschaltung" in fehler[0], fehler   # danach schon
+    finally:
+        gm.SOLL_NACHLAUF_S = alt
+        g.trennen()
+
+
 if __name__ == "__main__":
     test_suchen_oeffnen_messen()
     print("ok test_suchen_oeffnen_messen")
     test_sicherung_zu_viel_strom()
     print("ok test_sicherung_zu_viel_strom")
+    test_sicherung_nach_herunterstellen()
+    print("ok test_sicherung_nach_herunterstellen")

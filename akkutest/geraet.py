@@ -25,6 +25,9 @@ log = logging.getLogger("akkutest.geraet")
 INTERVALL = 1.0
 # Über USB-HID fragt die App selbst - so oft, wie das Gerät neue Werte hat
 HID_INTERVALL = 0.5
+# Nach dem Herunterstellen des Stroms gilt die Sicherung so lange noch für den alten Wert:
+# Messberichte, die schon unterwegs waren, zeigen sonst einen "zu hohen" Strom
+SOLL_NACHLAUF_S = 3.0
 
 
 @dataclass
@@ -104,6 +107,8 @@ class Geraet:
         self.firmware: str | None = None
         self._letzte_hid = 0.0
         self._soll_a: float | None = None       # USB: zuletzt gesetzter Strom
+        self._soll_vorher: float | None = None   # ... und der davor - Berichte kommen verzögert
+        self._soll_seit = 0.0
         self._zu_viel = 0
         self._hid_adresse = p.HID_ADRESSE
         self._entwirrer = Entwirrer()
@@ -174,7 +179,12 @@ class Geraet:
         USB-Befehle sind aus der Atorch-Software gelesen, nicht vom Hersteller
         beschrieben - verstünde das Gerät eine Zahl anders, soll das keinen
         Akku kosten."""
-        if not an or self._soll_a is None or strom <= self._soll_a * 1.3 + 0.1:
+        soll = self._soll_a
+        if soll is not None and self._soll_vorher is not None and \
+                time.monotonic() - self._soll_seit < SOLL_NACHLAUF_S:
+            # gerade heruntergestellt: Berichte von davor dürfen noch den alten Strom zeigen
+            soll = max(soll, self._soll_vorher)
+        if not an or soll is None or strom <= soll * 1.3 + 0.1:
             self._zu_viel = 0
             return
         self._zu_viel += 1
@@ -364,6 +374,7 @@ class Geraet:
 
     def strom_setzen(self, ampere: float) -> bool:
         if self.protokoll == "hid":
+            self._soll_vorher, self._soll_seit = self._soll_a, time.monotonic()
             self._soll_a = ampere
             return self._hid_setzen(p.HID_SOLLWERT, p.hid_zahl(ampere))
         return self._setzen(p.PX_STROM_SETZEN, *p.px_zahl_mit_hundertsteln(ampere))

@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.41 – 17.11.2026
+
+- **Keine falsche Sicherheitsabschaltung beim Herunterstellen:** Beim Wechsel
+  auf die nächste Spannung (Powerbank, Schnellladen) wird der Strom auf den
+  Mindeststrom gesenkt. Messberichte von kurz davor zeigten noch den alten
+  Strom, und die Sicherung brach die Prüfung ab („Es flossen 1,345 A statt
+  0,300 A“). Nach dem Herunterstellen gilt die Sicherung jetzt 3 Sekunden lang
+  noch für den alten Wert – bleibt der Strom danach zu hoch, schaltet sie wie
+  bisher ab.
+
 ## 1.0.40 – 17.11.2026
 
 - **Vorlage setzt Schnellladen mit:** Kann die Powerbank laut Vorlage mehr
