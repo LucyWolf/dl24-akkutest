@@ -556,7 +556,11 @@ def test_update_leiste():
     assert f.update_leiste.isVisible() and "9.9.9" in f.update_text.text() and f.knopf_jetzt.isVisible()
     f._update_von_hand = True
     f._update_stand({"neuer": False, "installiert": fenster.VERSION, "fehler": None})
-    assert "neueste Version" in f.banner.text()
+    assert "neueste Version" in f.banner.text() and f.banner.isVisible()
+    # kommt danach doch eine neue: die alte Meldung verschwindet
+    f._update_stand({"neuer": True, "verfuegbar": "9.9.10", "installiert": fenster.VERSION, "aktualisierbar": True})
+    assert not f.banner.isVisible() and "9.9.10" in f.update_text.text()
+    assert "color:#1b5e20" in f.update_leiste.styleSheet() and "QPushButton" in f.update_leiste.styleSheet()
     f.close()
 
 

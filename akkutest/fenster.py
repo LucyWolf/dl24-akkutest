@@ -179,7 +179,11 @@ class Fenster(QMainWindow):
     # -- Updates -------------------------------------------------------------
     def _update_leiste(self) -> QWidget:
         w = QFrame()
-        w.setStyleSheet("QFrame{background:#e8f5e9; border-radius:4px;} QLabel{color:#1b5e20; font-weight:bold;}")
+        # feste Farben auch für die Knöpfe - im dunklen Design wären sie sonst hell auf hellgrün
+        w.setStyleSheet("QFrame{background:#e8f5e9; border-radius:4px;} QLabel{color:#1b5e20; font-weight:bold;}"
+                        "QPushButton{color:#1b5e20; background:#ffffff; border:1px solid #2e7d32; border-radius:4px;"
+                        " padding:4px 12px; font-weight:bold;} QPushButton:hover{background:#c8e6c9;}"
+                        "QPushButton:disabled{color:#7a9a7c; border-color:#a5c8a7;}")
         h = QHBoxLayout(w)
         h.setContentsMargins(8, 4, 8, 4)
         self.update_text = QLabel()
@@ -212,6 +216,8 @@ class Fenster(QMainWindow):
         von_hand = getattr(self, "_update_von_hand", False)
         self._update_von_hand = False
         if stand.get("neuer"):
+            if "neueste Version" in self.banner.text():
+                self.banner.hide()                   # alte Meldung von vorhin passt nicht mehr
             self.update_text.setText(f"Neue Version {stand['verfuegbar']} verfügbar (installiert {stand['installiert']})")
             self.knopf_jetzt.setVisible(bool(stand.get("aktualisierbar")))
             if not stand.get("aktualisierbar"):

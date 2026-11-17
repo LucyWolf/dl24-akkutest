@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.54 – 17.11.2026
+
+- **Update-Leiste im dunklen Design lesbar:** „Jetzt aktualisieren“ und
+  „Später“ hatten helle Schrift auf hellgrünem Grund und waren kaum zu sehen.
+- Die Meldung „Du hast die neueste Version“ verschwindet, sobald danach doch
+  ein Update gefunden wird.
+
 ## 1.0.53 – 17.11.2026
 
 - **Neuer Reiter „Kabel“ – Kabeltester:** Erst eine Referenz (Netzteil über
