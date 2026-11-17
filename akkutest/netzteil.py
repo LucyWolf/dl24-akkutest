@@ -69,6 +69,13 @@ VORLAGEN = [
     ("Netzteil 12 V", 12.0, 2.0),
     ("Netzteil 12 V", 12.0, 5.0),
     ("Laptop-Netzteil 65 W", 19.0, 3.42),
+    # Step-Down-Modul, Datenblatt "CKCS PD65W Fast Charging Module" (TZT): 5V3A, 9V3A, 12V3A, 20V3.25A,
+    # "etc." - 15 V steht nicht ausdrücklich da, die App ermittelt es. PPS 3,3-21 V, Ripple < 200 mV.
+    ("TZT/CKCS PD65W Step-Down-Modul (Eingang 8–30 V)", 20.0, 3.25,
+     {"trigger": [[5.0, True, 3.0], [9.0, True, 3.0], [12.0, True, 3.0], [15.0, True, 0.0],
+                  [20.0, True, 3.25], [28.0, False, 0.0]],
+      "hinweis": "Step-Down-Modul: Der Eingang muss über der gewünschten Spannung liegen – für 20 V also "
+                 "mehr als 20 V (laut Datenblatt; Eingang höchstens 30 V)."}),
     ("Netzteil 24 V", 24.0, 2.5),
 ]
 

@@ -233,6 +233,13 @@ def test_netzteil_reiter():
     f.nt.bis_ende.setChecked(True)
     assert f.nt.warnung_ende.isVisible() and f.nt.mit_abschalt.isChecked() and not f.nt.max_proz.isEnabled()
     f.nt.bis_ende.setChecked(False)
+    # TZT/CKCS-Modul: Schnellladen mit allen Spannungen; 15 V steht im Datenblatt nur als "etc."
+    f.nt.vorlage.setCurrentIndex(f.nt.vorlage.findText("TZT/CKCS PD65W", flags=fenster.Qt.MatchStartsWith))
+    f.nt._vorlage()
+    assert f.nt.schnell.isChecked()
+    assert [(v, h.isChecked(), a.value()) for v, h, a in f.nt.trigger] == [
+        (5.0, True, 3.0), (9.0, True, 3.0), (12.0, True, 3.0), (15.0, True, 0), (20.0, True, 3.25), (28.0, False, 0)]
+    f.nt.schnell.setChecked(False)
     f.nt.vorlage.setCurrentIndex(f.nt.vorlage.findText("USB-Ladegerät 10 W", flags=fenster.Qt.MatchStartsWith))
     f.nt._vorlage()
     assert f.nt.nenn_v.value() == 5.0 and f.nt.nenn_a.value() == 2.0 and f.nt.nenn_w.value() == 10.0

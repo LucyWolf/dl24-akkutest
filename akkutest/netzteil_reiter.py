@@ -959,12 +959,21 @@ class NetzteilReiter(QWidget):
             self.toleranz.setValue(d.get("toleranz", 5))
             self.name.setText(d["eigen"])
         elif d:
+            extra = d[3] if len(d) > 3 else {}
             self.schnell.setChecked(False)
             v, a, name = d[:3]
             self.unbekannt.setChecked(False)
             self.nenn_v.setValue(v)
             self.nenn_a.setValue(a)
             self.name.setPlaceholderText(name)
+            if extra.get("trigger") and not self.powerbank:
+                # bekanntes Gerät mit Schnellladen: Spannungen gleich mit, über den Trigger-Adapter
+                for (_, haken, feld), (_, an, strom) in zip(self.trigger, extra["trigger"]):
+                    haken.setChecked(an)
+                    feld.setValue(strom)
+                self.schnell.setChecked(True)
+            if extra.get("hinweis"):
+                self.f.b.ereignis.emit("info", extra["hinweis"])
         self._angabe_zeigen()
 
     def _bis_ende_umschalten(self, an: bool) -> None:

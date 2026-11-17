@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.45 – 17.11.2026
+
+- **Vorlage „TZT/CKCS PD65W Step-Down-Modul (Eingang 8–30 V)“** bei den
+  Netzteilen, nach dem Datenblatt: 5 V 3 A, 9 V 3 A, 12 V 3 A, 20 V 3,25 A;
+  15 V steht dort nur als „etc.“ und wird ermittelt. Schnellladen ist gleich
+  gesetzt; beim Wählen kommt der Hinweis, dass der Eingang über der
+  gewünschten Spannung liegen muss.
+- Vorlagen bei den Netzteilen können jetzt die Spannungen für den
+  Trigger-Adapter mitbringen.
+
 ## 1.0.44 – 17.11.2026
 
 - **Bericht: „Grundlage der Grenzwerte“** – je geprüfter Spannung die Norm
