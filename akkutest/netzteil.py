@@ -259,7 +259,9 @@ def kabel_bewerten(mohm: float, typ: str) -> tuple[str, str] | None:
         return None
     name, grenze, nenn_a, budget_v = KABEL_TYPEN[typ]
     bis_a = budget_v / (mohm / 1000)
-    taugt = f"Taugt für bis zu {_k(min(bis_a, 99), 1)} A"
+    # mehr als der Typ hergibt, ist nie erlaubt - auch wenn der Widerstand es zuließe
+    taugt = (f"Taugt für die vollen {_k(nenn_a, None)} A" if bis_a >= nenn_a
+             else f"Taugt für bis zu {_k(bis_a, 1)} A")
     if mohm <= grenze:
         return "gruen", f"In Ordnung: {_k(mohm, 0)} mΩ, erlaubt sind {_k(grenze, 0)} mΩ ({name}). {taugt}."
     if mohm <= 2 * grenze:

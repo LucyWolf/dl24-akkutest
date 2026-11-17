@@ -121,7 +121,7 @@ def test_ganzer_ablauf():
     assert "Zelle A" in inhalt and "Zustand %" in inhalt
 
     # Diagnose zeigt die Bytes
-    f.reiter.setCurrentIndex(5)
+    f.reiter.setCurrentIndex(6)
     assert "> B1 B2 11" in f.diag.toPlainText()
     assert "< CA CB" in f.diag.toPlainText()
     foto(f, "5-diagnose")
@@ -392,8 +392,8 @@ def test_steuerung_von_hand():
     SimulatorVerbindung.voreinstellung = {"tempo": 5}
     f = fenster.Fenster(Speicher())
     f.show()
-    f.reiter.setCurrentIndex(4)
-    assert f.reiter.tabText(4) == "Steuerung"
+    f.reiter.setCurrentIndex(5)
+    assert f.reiter.tabText(5) == "Steuerung"
     assert not f.steuerung.knopf_ein.isEnabled()
     f.anschluss.setCurrentIndex(f.anschluss.findText("Simulator – USB-Ladegerät", flags=fenster.Qt.MatchStartsWith))
     f.verbinden_umschalten()
@@ -495,6 +495,55 @@ def test_schnellladen_im_fenster():
     alle = sp.netzteil_tests()
     assert alle[0]["name"] == "Schnelllader" and f.nt.tabelle.item(0, 2).text() == "PD/QC 5/9 V", f.nt.tabelle.item(0, 2).text()
     assert f.nt.tabelle.item(0, 4).text().startswith("bis ")
+    f.trennen()
+    f.close()
+
+
+def test_kabeltester():
+    from akkutest import kabel_reiter as kr
+    # Auswertung: Referenz abziehen, Grenzen nach Typ
+    d = kr.auswerten(120, 237, "usbc3", 22.0, 31.0)
+    assert d["kabel_mohm"] == 117 and d["ampel"] == "gruen" and abs(d["bis_a"] - 0.75 / 0.117) < 0.01
+    assert [round(v, 3) for _, v, _ in d["tabelle"]] == [0.117, 0.234, 0.351]
+    h = kr.bericht_html(dict(d, name="Testkabel", wann=0))
+    assert "117 mΩ" in h and "237 mΩ mit Kabel − 120 mΩ ohne" in h and "+9 K" in h
+    assert kr.auswerten(None, 300, "usbc5")["ohne_referenz"]
+    # im Fenster: Referenz ohne Kabel, dann "Kabel" mit 100 mΩ mehr
+    geraet.HID_INTERVALL = 0.02
+    SimulatorVerbindung.voreinstellung = {"tempo": 60}
+    sp = Speicher()
+    f = fenster.Fenster(sp)
+    f.resize(1280, 900)
+    f.show()
+    f.reiter.setCurrentIndex(4)
+    assert f.reiter.tabText(4) == "Kabel"
+    f.anschluss.setCurrentIndex(f.anschluss.findText("Simulator – USB-Ladegerät", flags=fenster.Qt.MatchStartsWith))
+    f.verbinden_umschalten()
+    assert warten(lambda: f.geraet is not None and f.letzter is not None), meldungen
+    kt = f.kt
+    kt.name.setText("Testkabel")
+    kt.strom.setValue(2.0)
+    assert kt.knopf_start.isEnabled()
+    kt.starten()
+    assert kt.laeuft and not f.nt.knopf_start.isEnabled()
+    assert warten(lambda: kt.knopf_weiter.isVisible(), 60), kt.schritt.text()
+    assert 100 <= kt._ref <= 140 and "Referenz" in kt.schritt.text(), kt._ref
+    f.geraet.v.geraet.akku.innen += 0.100          # jetzt steckt ein Kabel mit 100 mΩ dazwischen
+    kt.knopf_weiter.click()
+    assert warten(lambda: not kt.laeuft and kt.ergebnis.isVisible(), 90), kt.schritt.text()
+    d = kt._letztes
+    print("Kabel:", d["kabel_mohm"], d["ref_mohm"], d["gesamt_mohm"], d["ampel"])
+    assert 80 <= d["kabel_mohm"] <= 120 and d["ampel"] == "gruen" and d["nenn_a"] == 3.0, d
+    assert "Taugt bis" in kt.ergebnis.text() and "3 A – mehr ist" in kt.ergebnis.text()
+    assert kt.tabelle.rowCount() == 1 and "Testkabel" in kt.tabelle.item(0, 1).text()
+    foto(f, "16-kabeltester")
+    kt.uebernehmen()
+    assert f.nt.kabel.value() == d["kabel_mohm"] and f.pb.kabel.value() == d["kabel_mohm"]
+    assert f.nt.kabel_name.text() == "Testkabel"
+    pdf = Path(os.environ["AKKUTEST_DATEN"]) / "kabel.pdf"
+    assert kt.bericht_speichern(str(pdf)) == str(pdf) and pdf.stat().st_size > 5000
+    f.nt.kabel.setValue(0)
+    f.pb.kabel.setValue(0)
     f.trennen()
     f.close()
 

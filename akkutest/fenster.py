@@ -134,6 +134,9 @@ class Fenster(QMainWindow):
         from .powerbank_reiter import PowerbankReiter
         self.pb = PowerbankReiter(self)
         self.reiter.addTab(self.pb, "Powerbanks")
+        from .kabel_reiter import KabelReiter
+        self.kt = KabelReiter(self)
+        self.reiter.addTab(self.kt, "Kabel")
         from .steuerung_reiter import SteuerungReiter
         self.steuerung = SteuerungReiter(self)
         self.reiter.addTab(self.steuerung, "Steuerung")
@@ -338,7 +341,8 @@ class Fenster(QMainWindow):
     @property
     def pruef_reiter(self) -> list:
         """Reiter, die selbst eine Prüfung fahren (Netzteile, Powerbanks)."""
-        return [r for r in (getattr(self, "nt", None), getattr(self, "pb", None)) if r is not None]
+        return [r for r in (getattr(self, "nt", None), getattr(self, "pb", None), getattr(self, "kt", None))
+                if r is not None]
 
     @property
     def pruefung_laeuft(self):
@@ -1060,7 +1064,7 @@ def main() -> int:
     if "--fenster-probe" in sys.argv:
         # Für den Bau: öffnet das Fenster wirklich und schließt es wieder
         sichtbar = []
-        QTimer.singleShot(800, lambda: (sichtbar.append(f.isVisible() and f.reiter.count() == 6), app.quit()))
+        QTimer.singleShot(800, lambda: (sichtbar.append(f.isVisible() and f.reiter.count() == 7), app.quit()))
         rc = app.exec()
         print("Fenster geöffnet:", sichtbar, f.windowTitle())
         return rc if sichtbar == [True] else 1

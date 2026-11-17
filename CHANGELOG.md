@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.53 – 17.11.2026
+
+- **Neuer Reiter „Kabel“ – Kabeltester:** Erst eine Referenz (Netzteil über
+  einen kurzen Adapter direkt am DL24), dann mit dem Kabel – die Differenz ist
+  der Widerstand des Kabels, ohne den des Netzteils. Bewertung nach USB-Typ
+  (USB-C 3 A / 5 A, USB 2.0), bis zu welchem Strom es taugt, Spannungsabfall
+  und Verlust bei 1–5 A, auf Wunsch Dauertest mit Temperaturfühler am
+  Stecker. Liste der geprüften Kabel, Bericht als PDF und „Als Kabelwert
+  übernehmen“ für Netzteile und Powerbanks.
+- Kabelbewertung: „Taugt für die vollen 3 A“ statt „bis zu 7,5 A“, wenn der
+  Widerstand mehr erlauben würde, als der Kabeltyp hergibt.
+
 ## 1.0.52 – 17.11.2026
 
 - **Updater:** Die App sieht kurz nach dem Start und danach alle sechs
