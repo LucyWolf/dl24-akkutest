@@ -547,6 +547,11 @@ def test_kabeltester():
     kt = f.kt
     assert kt.mit_dauer.isChecked()                    # Dauertest standardmäßig an
     kt.mit_dauer.setChecked(False)                     # hier zu lang
+    # Netzteil-Auswahl: geprüfte Netzteile und Vorlagen stehen drin, frei tippen geht trotzdem
+    namen = [kt.netzteil_wahl.itemText(i) for i in range(kt.netzteil_wahl.count())]
+    assert "TZT/CKCS PD65W Step-Down-Modul (Eingang 8–30 V)" in namen and "USB-Ladegerät 10 W" in namen, namen
+    kt.netzteil.setText("mein Netzteil")
+    assert kt.netzteil.text() == "mein Netzteil"
     kt.angabe.setCurrentIndex(kt.angabe.findData(140))
     assert kt.typ.currentData() == "usbc5" and kt.strom.value() == 5.0
     assert [v for v, h in kt.spannungen if h.isChecked()] == [5.0, 9.0, 12.0, 15.0, 20.0, 28.0]

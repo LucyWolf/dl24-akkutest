@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.63 – 17.11.2026
+
+- **Kabeltest: Netzteil aus einer Liste wählen** – eigene Netzteil-Vorlagen,
+  schon geprüfte Netzteile und die mitgelieferten Vorlagen; frei tippen geht
+  weiterhin. Die Liste wird beim Öffnen des Reiters aufgefrischt.
+
 ## 1.0.62 – 17.11.2026
 
 - **Kabeltest: „Angabe auf dem Kabel“** (60 / 100 / 140 / 240 W). Stellt Typ,

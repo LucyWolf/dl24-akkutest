@@ -380,11 +380,15 @@ class KabelReiter(QWidget):
         self.ref_name.setToolTip("Das kürzeste, beste Kabel, das du hast. Damit wird die Referenz gemessen – das "
                                  "Ergebnis ist um seinen Widerstand zu klein. Immer dasselbe nehmen.")
         f.addRow("Referenzkabel:", self.ref_name)
-        self.netzteil = QLineEdit()
+        # Auswahl aus den gespeicherten Netzteilen - und frei zu tippen
+        self.netzteil_wahl = QComboBox()
+        self.netzteil_wahl.setEditable(True)
+        self.netzteil_wahl.setInsertPolicy(QComboBox.NoInsert)
+        self.netzteil = self.netzteil_wahl.lineEdit()
         self.netzteil.setPlaceholderText("z. B. TZT-Modul an 20-V-Netzteil")
         self.netzteil.setToolTip("Die Referenz misst Netzteil + Referenzkabel. Eine gespeicherte Referenz stimmt "
                                  "nur mit demselben Netzteil und Adapter.")
-        f.addRow("Netzteil:", self.netzteil)
+        f.addRow("Netzteil:", self.netzteil_wahl)
         zeile = QHBoxLayout()
         self.ref_wahl = QComboBox()
         self.ref_wahl.setToolTip("Gespeicherte Referenz: Schritt 1 entfällt – gleich das zu prüfende Kabel stecken.")
@@ -396,7 +400,8 @@ class KabelReiter(QWidget):
         f.addRow("Referenz:", zeile)
         self.ref_wahl.currentIndexChanged.connect(self._ref_gewaehlt)
         self.mit_ref.toggled.connect(lambda an: [w.setEnabled(an) for w in
-                                                 (self.ref_name, self.netzteil, self.ref_wahl, self.knopf_ref_weg)])
+                                                 (self.ref_name, self.netzteil_wahl, self.ref_wahl,
+                                                  self.knopf_ref_weg)])
         self.alle_v = QCheckBox("Alle Spannungen über den Trigger-Adapter prüfen:")
         self.alle_v.setToolTip("Referenz und Kabel werden bei jeder gewählten Spannung gemessen – die App sagt, "
                                "wann am Trigger-Adapter umgeschaltet wird.")
@@ -454,6 +459,7 @@ class KabelReiter(QWidget):
         self.dauer_jede.toggled.connect(lambda an: self._einst.setValue("kt/dauer_jede", an))
         self.ref_name.setText(str(self._einst.value("kt/ref_name", "") or ""))
         self.ref_name.textChanged.connect(lambda s: self._einst.setValue("kt/ref_name", s))
+        self.netzteile_laden()
         self.netzteil.setText(str(self._einst.value("kt/netzteil", "") or ""))
         self.netzteil.textChanged.connect(lambda s: self._einst.setValue("kt/netzteil", s))
         self.referenzen_laden()
@@ -588,7 +594,7 @@ class KabelReiter(QWidget):
         frei = not self.laeuft
         self.knopf_start.setEnabled(self._steuer_ok and frei)
         self.knopf_abbruch.setEnabled(not frei)
-        for w in (self.name, self.angabe, self.typ, self.strom, self.mit_ref, self.mit_dauer, self.dauer_min,
+        for w in (self.name, self.angabe, self.typ, self.strom, self.mit_ref, self.netzteil_wahl, self.mit_dauer, self.dauer_min,
                   self.mit_fuehler, self.temp_grenze, self.alle_v, self.dauer_jede):
             w.setEnabled(frei)
         for _, hk in self.spannungen:
@@ -937,6 +943,34 @@ class KabelReiter(QWidget):
                 r.kabel_typ.setCurrentIndex(i)
         self.f.b.ereignis.emit("info", f"Kabelwert {d['kabel_mohm']:.0f} mΩ übernommen – gilt für Netzteile und "
                                        "Powerbanks")
+
+    def netzteile_laden(self) -> None:
+        """Eigene Vorlagen, schon geprüfte Netzteile und die mitgelieferten Vorlagen."""
+        jetzt = self.netzteil.text()
+        namen: list[str] = []
+        try:
+            namen += [n for n, d in self.f.speicher.vorlagen() if not d.get("powerbank")]
+            namen += [d["name"] for d in self.f.speicher.netzteil_tests()
+                      if not d["einstellung"].get("powerbank") and d.get("name")]
+        except Exception:
+            log.exception("Netzteile für die Auswahl")
+        namen += [n for n, *_ in nt.VORLAGEN]
+        gesehen, liste = set(), []
+        for n in namen:
+            if n and n not in gesehen:
+                gesehen.add(n)
+                liste.append(n)
+        self.netzteil_wahl.blockSignals(True)
+        self.netzteil_wahl.clear()
+        self.netzteil_wahl.addItems(liste)
+        self.netzteil_wahl.setCurrentIndex(-1)
+        self.netzteil.setText(jetzt)
+        self.netzteil_wahl.blockSignals(False)
+
+    def showEvent(self, ereignis) -> None:
+        super().showEvent(ereignis)
+        if hasattr(self, "netzteil_wahl"):
+            self.netzteile_laden()               # inzwischen geprüfte Netzteile mit aufnehmen
 
     # -- gespeicherte Referenzen -------------------------------------------
     def _ref_datei(self):
