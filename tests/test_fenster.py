@@ -514,6 +514,19 @@ def test_kabeltester():
     heiss = dict(kr.auswerten(0, 120, "usbc5", 24.0, 58.0), pruef_a=3.0, stabil=False, wann=0)
     h = kr.bericht_html(heiss)
     assert "✘ nicht bestanden" in h and "gilt nur für 3,0 A" in h and "noch nicht stabil" in h
+    # Angabe auf dem Kabel: 140 W = 5 A bis 28 V
+    gut = dict(kr.auswerten(0, 120, "usbc5", 24.0, 40.0), pruef_a=5.0, stabil=True, wann=0, angabe_w=140,
+               je_spannung=[(5.0, 0, 120, 120, 5.0), (28.0, 0, 120, 120, 5.0)])
+    assert kr.angabe_pruefen(gut)[0] == "ja" and "✔ Erfüllt die Angabe" in kr.bericht_html(gut)
+    schlecht = dict(gut, kabel_mohm=200.0)
+    g, punkte = kr.angabe_pruefen(schlecht)
+    h = kr.bericht_html(schlecht)
+    assert g == "nicht" and "Warum nicht" in h and "50 mΩ zu viel" in h and "1,00 V" in h, h
+    offen = dict(gut, pruef_a=3.0, je_spannung=[(20.0, 0, 120, 120, 3.0)])
+    g, punkte = kr.angabe_pruefen(offen)
+    h = kr.bericht_html(offen)
+    assert g == "offen" and "nur mit 3,0 A geprüft" in h and "geprüft bis 20 V" in h, h
+    assert kr.angabe_pruefen(dict(gut, angabe_w=0)) is None
     # kritisch: 3 A machen +12 K -> +30 K bei 3·√(30/12) ≈ 4,7 A; Spannungsabfall erst bei 0,75/0,12 = 6,25 A
     krit = kr.kritisch(dict(kr.auswerten(0, 120, "usbc5", 24.0, 36.0), pruef_a=3.0))
     assert abs(krit[0] - 3 * (30 / 12) ** 0.5) < 0.01 and "Wärme" in krit[1], krit
@@ -534,6 +547,11 @@ def test_kabeltester():
     kt = f.kt
     assert kt.mit_dauer.isChecked()                    # Dauertest standardmäßig an
     kt.mit_dauer.setChecked(False)                     # hier zu lang
+    kt.angabe.setCurrentIndex(kt.angabe.findData(140))
+    assert kt.typ.currentData() == "usbc5" and kt.strom.value() == 5.0
+    assert [v for v, h in kt.spannungen if h.isChecked()] == [5.0, 9.0, 12.0, 15.0, 20.0, 28.0]
+    kt.angabe.setCurrentIndex(0)
+    kt.typ.setCurrentIndex(kt.typ.findData("usbc3"))
     kt.name.setText("Testkabel")
     kt.ref_name.setText("Kurz 15 cm")
     kt.strom.setValue(2.0)

@@ -96,10 +96,89 @@ def _min(s: float) -> str:
     return f"{s // 60}:{s % 60:02d} min"
 
 
+# Was auf Kabeln steht: Watt -> (Strom, höchste Spannung, Kabeltyp)
+ANGABEN = {60: (3.0, 20.0, "usbc3"), 100: (5.0, 20.0, "usbc5"), 140: (5.0, 28.0, "usbc5"),
+           240: (5.0, 48.0, "usbc5")}
+
+
+def angabe_pruefen(d: dict) -> tuple[str, list[tuple[str, str, str]]] | None:
+    """Hält das Kabel die Angabe? (Gesamt, [(Zeichen, Punkt, Begründung)]) - Zeichen ✔ ✘ ?"""
+    w = d.get("angabe_w")
+    if not w or w not in ANGABEN:
+        return None
+    a, v, typ = ANGABEN[w]
+    grenze = nt.KABEL_TYPEN[typ][1]
+    r = d["kabel_mohm"]
+    punkte = []
+    punkte.append(("✔" if r <= grenze else "✘", "Widerstand",
+                   f"{zahl(r, 0)} mΩ – erlaubt höchstens {zahl(grenze, 0)} mΩ für {zahl(a, 0)} A "
+                   "(USB Type-C §4.4.1)" + ("" if r <= grenze else f", also {zahl(r - grenze, 0)} mΩ zu viel")))
+    abfall = a * r / 1000
+    punkte.append(("✔" if abfall <= 0.75 else "✘", f"Spannungsabfall bei {zahl(a, 0)} A",
+                   f"{zahl(abfall, 2)} V – erlaubt höchstens 0,75 V (500 mV VBUS + 250 mV GND)"))
+    k, strom = d.get("erwaermung_k"), d.get("pruef_a") or 0
+    if k is None:
+        punkte.append(("?", f"Erwärmung bei {zahl(a, 0)} A", "nicht gemessen – ohne Temperaturfühler"))
+    elif strom < a - 1e-6:
+        hoch = k * (a / strom) ** 2 if strom else None
+        punkte.append(("?", f"Erwärmung bei {zahl(a, 0)} A",
+                       f"nur mit {zahl(strom, 1)} A geprüft (+{zahl(k, 1)} K) – bei {zahl(a, 0)} A wären es "
+                       f"hochgerechnet etwa +{zahl(hoch, 0)} K" + (" – das wäre über +30 K" if hoch and hoch > 30
+                                                                  else "") +
+                       f". Für den Nachweis mit {zahl(a, 0)} A prüfen."))
+    else:
+        ok = k <= ERWAERMUNG_MAX_K
+        punkte.append(("✔" if ok else "✘", f"Erwärmung bei {zahl(a, 0)} A",
+                       f"+{zahl(k, 1)} K – erlaubt höchstens +30 K (Prüfung B-6-1)"
+                       + ("" if d.get("stabil", True) else " – Temperatur war noch nicht stabil")))
+    gepr_v = max([x[0] for x in d.get("je_spannung") or []] or [5.0])
+    punkte.append(("✔" if gepr_v >= v - 0.5 else "?", f"Spannung bis {zahl(v, 0)} V",
+                   f"geprüft bis {zahl(gepr_v, 0)} V" + ("" if gepr_v >= v - 0.5 else
+                                                      f" – die Angabe von {zahl(v, 0)} V ist damit nicht nachgewiesen. "
+                                                      "Die Isolation für hohe Spannung misst der DL24 nicht.")))
+    if a > 3:
+        punkte.append(("?", "E-Marker (für mehr als 3 A nötig)",
+                       "kann der DL24 nicht auslesen – ohne E-Marker liefert ein Netzteil höchstens 3 A"))
+    if any(p[0] == "✘" for p in punkte):
+        gesamt = "nicht"
+    elif any(p[0] == "?" and not p[1].startswith("E-Marker") for p in punkte):
+        gesamt = "offen"
+    else:
+        gesamt = "ja"
+    return gesamt, punkte
+
+
+def angabe_html(d: dict) -> str:
+    erg = angabe_pruefen(d)
+    if not erg:
+        return ""
+    gesamt, punkte = erg
+    w = d["angabe_w"]
+    a, v, _ = ANGABEN[w]
+    gruende = [f"{p[1]}: {p[2]}" for p in punkte if p[0] == "✘"]
+    offen = [p[1] for p in punkte if p[0] == "?" and not p[1].startswith("E-Marker")]
+    kopf = {"ja": ("#2e9e4f", "✔ Erfüllt die Angabe"),
+            "nicht": ("#d03b3b", "✘ Erfüllt die Angabe nicht"),
+            "offen": ("#c77700", "? Nicht vollständig geprüft")}[gesamt]
+    z = [f"<h3>Hält das Kabel, was angegeben ist? ({w} W = {zahl(a, 0)} A bei bis zu {zahl(v, 0)} V)</h3>",
+         f"<p style='font-size:16px; color:{kopf[0]}'><b>{kopf[1]}</b></p>"]
+    if gruende:
+        z.append("<p><b>Warum nicht:</b><br>" + "<br>".join("• " + html.escape(g) for g in gruende) + "</p>")
+    elif offen:
+        z.append("<p><b>Was noch fehlt:</b> " + html.escape(", ".join(offen)) + "</p>")
+    farbe = {"✔": "#2e9e4f", "✘": "#d03b3b", "?": "#c77700"}
+    z.append("<table cellspacing=5>" + "".join(
+        f"<tr><td style='color:{farbe[p[0]]}'><b>{p[0]}</b></td><td>{html.escape(p[1])}</td>"
+        f"<td>{html.escape(p[2])}</td></tr>" for p in punkte) + "</table>")
+    return "".join(z)
+
+
 def bericht_html(d: dict) -> str:
     z = [f"<h2>Kabel: {html.escape(d.get('name') or 'ohne Namen')}</h2>",
          f"<p style='color:gray'>geprüft am {datetime.fromtimestamp(d.get('wann', time.time())):%d.%m.%Y um %H:%M} "
-         f"Uhr · Typ: {html.escape(d.get('typ_name', ''))}</p>"]
+         f"Uhr · Typ: {html.escape(d.get('typ_name', ''))}"
+         + (f" · Angabe: {d['angabe_w']} W" if d.get("angabe_w") else "") + "</p>"]
+    z.append(angabe_html(d))
     if d.get("ampel"):
         z.append(f"<p style='font-size:17px; color:{AMPEL[d['ampel']]}'><b>{html.escape(d['satz'])}</b></p>")
     else:
@@ -271,6 +350,14 @@ class KabelReiter(QWidget):
         self.name = QLineEdit()
         self.name.setPlaceholderText("z. B. Anker USB-C 1 m schwarz")
         f.addRow("Bezeichnung:", self.name)
+        self.angabe = QComboBox()
+        self.angabe.addItem("nicht angegeben", 0)
+        for w, (a, v, _) in ANGABEN.items():
+            self.angabe.addItem(f"{w} W ({a:g} A, bis {v:g} V)", w)
+        self.angabe.setToolTip("Was auf dem Kabel oder der Verpackung steht. Der Bericht sagt dann, ob das Kabel "
+                               "das hält – und wenn nicht, warum.")
+        self.angabe.currentIndexChanged.connect(self._angabe_gewaehlt)
+        f.addRow("Angabe auf dem Kabel:", self.angabe)
         self.typ = QComboBox()
         for k, (n, grenze, a, _) in nt.KABEL_TYPEN.items():
             self.typ.addItem(f"{n} – erlaubt {grenze:.0f} mΩ", k)
@@ -481,6 +568,16 @@ class KabelReiter(QWidget):
     def _typ_gewaehlt(self, *_) -> None:
         self.strom.setValue(nt.KABEL_TYPEN[self.typ.currentData()][2])
 
+    def _angabe_gewaehlt(self, *_) -> None:
+        w = self.angabe.currentData()
+        if w in ANGABEN:
+            a, v, typ = ANGABEN[w]
+            self.typ.setCurrentIndex(self.typ.findData(typ))
+            self.strom.setValue(a)
+            # bis zur angegebenen Spannung prüfen - höhere gibt das Kabel nicht her
+            for sp, hk in self.spannungen:
+                hk.setChecked(sp <= v + 0.5)
+
     # ------------------------------------------------------------------
     @property
     def laeuft(self) -> bool:
@@ -491,7 +588,7 @@ class KabelReiter(QWidget):
         frei = not self.laeuft
         self.knopf_start.setEnabled(self._steuer_ok and frei)
         self.knopf_abbruch.setEnabled(not frei)
-        for w in (self.name, self.typ, self.strom, self.mit_ref, self.mit_dauer, self.dauer_min,
+        for w in (self.name, self.angabe, self.typ, self.strom, self.mit_ref, self.mit_dauer, self.dauer_min,
                   self.mit_fuehler, self.temp_grenze, self.alle_v, self.dauer_jede):
             w.setEnabled(frei)
         for _, hk in self.spannungen:
@@ -722,6 +819,7 @@ class KabelReiter(QWidget):
         d["stabil"] = r.temp_stabil
         d["ref_name"] = self.ref_name.text().strip() if self._ref is not None else ""
         d["bedingungen"] = bedingungen(ab.punkte)
+        d["angabe_w"] = self.angabe.currentData() or 0
         d.update(name=self.name.text().strip(), wann=time.time(), zu_heiss=r.zu_heiss,
                  kurve=[list(p) for p in nt.duennen(ab.punkte, 600)])
         self._zeigen(d)
@@ -802,6 +900,7 @@ class KabelReiter(QWidget):
         d["stabil"] = any(t["ergebnis"].get("temp_stabil") for t in ab.ergebnis.teile)
         d["ref_name"] = self.ref_name.text().strip() if ref else ""
         d["bedingungen"] = bedingungen(ab.punkte)
+        d["angabe_w"] = self.angabe.currentData() or 0
         d.update(name=self.name.text().strip(), wann=time.time(), je_spannung=je, fehlt=fehlt,
                  pruef_a=self.strom.value(), kurve=[list(p) for p in nt.duennen(ab.punkte, 900)])
         self._zeigen(d)
@@ -911,9 +1010,15 @@ class KabelReiter(QWidget):
         from PySide6.QtGui import QColor
         for i, d in enumerate(self._alle):
             ampel = d.get("ampel")
+            bewertung = {"gruen": "✔ in Ordnung", "gelb": "⚠ schwach", "rot": "✘ Schrott"}.get(ampel, "–")
+            erg = angabe_pruefen(d)
+            if erg:
+                # mit Angabe zählt, ob es die hält
+                bewertung = {"ja": f"✔ hält {d['angabe_w']} W", "nicht": f"✘ hält {d['angabe_w']} W nicht",
+                             "offen": f"? {d['angabe_w']} W nicht ganz geprüft"}[erg[0]]
+                ampel = {"ja": "gruen", "nicht": "rot", "offen": "gelb"}[erg[0]]
             werte = [datetime.fromtimestamp(d.get("wann", 0)).strftime("%d.%m.%Y %H:%M"), d.get("name") or "–",
-                     f"{d['kabel_mohm']:.0f} mΩ", {"gruen": "✔ in Ordnung", "gelb": "⚠ schwach",
-                                                    "rot": "✘ Schrott"}.get(ampel, "–"),
+                     f"{d['kabel_mohm']:.0f} mΩ", bewertung,
                      zahl(d["temp_max"], 0, "°C") if d.get("temp_max") is not None else "–"]
             for k, text in enumerate(werte):
                 z = QTableWidgetItem(text)

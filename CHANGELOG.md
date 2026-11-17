@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.62 – 17.11.2026
+
+- **Kabeltest: „Angabe auf dem Kabel“** (60 / 100 / 140 / 240 W). Stellt Typ,
+  Prüfstrom und die Spannungen passend ein. Der Bericht sagt, ob das Kabel
+  die Angabe hält – je Punkt (Widerstand, Spannungsabfall, Erwärmung beim
+  angegebenen Strom, Spannung) mit ✔/✘/? und Begründung, bei „nicht“ unter
+  „Warum nicht“, bei Lücken unter „Was noch fehlt“. Die Liste zeigt
+  „hält 140 W“ / „hält 140 W nicht“.
+
 ## 1.0.61 – 17.11.2026
 
 - **Dauertest bei jeder Spannung:** neuer Haken (an, gemerkt) – über den
