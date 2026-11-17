@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.47 – 17.11.2026
+
+- **Widerstand während der Prüfung ohne Sprung auf 0:** Die Anzeige rechnet
+  jetzt wie das Ergebnis mit einer Ausgleichsgeraden durch die fertigen
+  Stufen. Vorher verglich sie mit der Spannung ohne Last – hob das Gerät die
+  Spannung bei kleiner Last etwas an, kam „0 mΩ“ heraus.
+
 ## 1.0.46 – 17.11.2026
 
 - **Gestrichelte Buchsen-Kurve bleibt im Bild:** Beim Schnellladen wurde die

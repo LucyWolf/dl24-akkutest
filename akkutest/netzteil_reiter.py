@@ -1483,8 +1483,17 @@ class NetzteilReiter(QWidget):
         ab = self.ablauf
         teil = ab.teil if isinstance(ab, nt.TriggerAblauf) else ab
         leer = teil.ergebnis.leerlauf_v if isinstance(teil, nt.NetzteilAblauf) else None
-        if leer and m.strom > 0.1 and ab and ab.laeuft:
-            self.anz["r"].setzen(f"{max(0.0, (leer - m.spannung) / m.strom) * 1000:.0f} mΩ")
+        fertig = list(teil.ergebnis.stufen) if isinstance(teil, nt.NetzteilAblauf) else []
+        if len(fertig) >= 2 and ab and ab.laeuft:
+            # wie im Ergebnis: Ausgleichsgerade durch die fertigen Stufen - ruhig und ohne Sprünge,
+            # auch wenn das Gerät bei kleiner Last die Spannung etwas anhebt
+            w = nt.widerstand(fertig)
+            self.anz["r"].setzen(f"{w:.0f} mΩ" if w is not None else "–")
+        elif leer and m.strom > 0.1 and ab and ab.laeuft:
+            # bis zwei Stufen fertig sind: gegen den Wert ohne Last (Powerbank: beim Mindeststrom)
+            i0 = teil.einstellung.mindest_a if teil.einstellung.powerbank else 0.0
+            d_i = m.strom - i0
+            self.anz["r"].setzen(f"{max(0.0, (leer - m.spannung) / d_i) * 1000:.0f} mΩ" if d_i > 0.1 else "–")
         elif not (ab and ab.laeuft):
             r = getattr(self, "_angezeigt", (None, {}))[1] or {}
             self.anz["r"].setzen(f"{r['widerstand_mohm']:.0f} mΩ" if r.get("widerstand_mohm") else "–")
