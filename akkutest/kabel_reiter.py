@@ -293,7 +293,23 @@ class KabelReiter(QWidget):
         self.ref_name.setToolTip("Das kürzeste, beste Kabel, das du hast. Damit wird die Referenz gemessen – das "
                                  "Ergebnis ist um seinen Widerstand zu klein. Immer dasselbe nehmen.")
         f.addRow("Referenzkabel:", self.ref_name)
-        self.mit_ref.toggled.connect(self.ref_name.setEnabled)
+        self.netzteil = QLineEdit()
+        self.netzteil.setPlaceholderText("z. B. TZT-Modul an 20-V-Netzteil")
+        self.netzteil.setToolTip("Die Referenz misst Netzteil + Referenzkabel. Eine gespeicherte Referenz stimmt "
+                                 "nur mit demselben Netzteil und Adapter.")
+        f.addRow("Netzteil:", self.netzteil)
+        zeile = QHBoxLayout()
+        self.ref_wahl = QComboBox()
+        self.ref_wahl.setToolTip("Gespeicherte Referenz: Schritt 1 entfällt – gleich das zu prüfende Kabel stecken.")
+        zeile.addWidget(self.ref_wahl, 1)
+        self.knopf_ref_weg = QPushButton("Löschen")
+        self.knopf_ref_weg.setToolTip("Gewählte gespeicherte Referenz löschen")
+        self.knopf_ref_weg.clicked.connect(self.referenz_loeschen)
+        zeile.addWidget(self.knopf_ref_weg)
+        f.addRow("Referenz:", zeile)
+        self.ref_wahl.currentIndexChanged.connect(self._ref_gewaehlt)
+        self.mit_ref.toggled.connect(lambda an: [w.setEnabled(an) for w in
+                                                 (self.ref_name, self.netzteil, self.ref_wahl, self.knopf_ref_weg)])
         self.alle_v = QCheckBox("Alle Spannungen über den Trigger-Adapter prüfen:")
         self.alle_v.setToolTip("Referenz und Kabel werden bei jeder gewählten Spannung gemessen – die App sagt, "
                                "wann am Trigger-Adapter umgeschaltet wird.")
@@ -325,6 +341,10 @@ class KabelReiter(QWidget):
         zeile.addWidget(self.mit_dauer)
         zeile.addWidget(self.dauer_min)
         f.addRow(zeile)
+        self.dauer_jede = QCheckBox("Dauertest bei jeder Spannung (sonst nur bei der niedrigsten)")
+        self.dauer_jede.setToolTip("Über den Trigger-Adapter: an = bei jeder gewählten Spannung bis stabil. "
+                                   "Aus = nur einmal bei der niedrigsten - die Wärme im Kabel hängt nur vom Strom ab.")
+        f.addRow(self.dauer_jede)
         self.mit_fuehler = QCheckBox("Temperaturfühler am Stecker, Grenze:")
         self.temp_grenze = QSpinBox()
         self.temp_grenze.setRange(30, 90)
@@ -343,8 +363,13 @@ class KabelReiter(QWidget):
         # ohne Dauertest sieht man keinen Temperaturanstieg - standardmäßig an, gemerkt
         self.mit_dauer.setChecked(str(self._einst.value("kt/dauer", "true")).lower() == "true")
         self.mit_dauer.toggled.connect(lambda an: self._einst.setValue("kt/dauer", an))
+        self.dauer_jede.setChecked(str(self._einst.value("kt/dauer_jede", "true")).lower() == "true")
+        self.dauer_jede.toggled.connect(lambda an: self._einst.setValue("kt/dauer_jede", an))
         self.ref_name.setText(str(self._einst.value("kt/ref_name", "") or ""))
         self.ref_name.textChanged.connect(lambda s: self._einst.setValue("kt/ref_name", s))
+        self.netzteil.setText(str(self._einst.value("kt/netzteil", "") or ""))
+        self.netzteil.textChanged.connect(lambda s: self._einst.setValue("kt/netzteil", s))
+        self.referenzen_laden()
         self.temp_grenze.valueChanged.connect(lambda w: self._einst.setValue("kt/temp_grenze", w))
         hinweis = QLabel("<b>Ablauf:</b> 1. Netzteil <b>ohne</b> das Kabel am DL24 (Adapter mit USB-C-Stecker "
                          "oder kürzestes Kabel) – Referenz. 2. Das Kabel dazwischen stecken – Messung. Die "
@@ -467,7 +492,7 @@ class KabelReiter(QWidget):
         self.knopf_start.setEnabled(self._steuer_ok and frei)
         self.knopf_abbruch.setEnabled(not frei)
         for w in (self.name, self.typ, self.strom, self.mit_ref, self.mit_dauer, self.dauer_min,
-                  self.mit_fuehler, self.temp_grenze, self.alle_v):
+                  self.mit_fuehler, self.temp_grenze, self.alle_v, self.dauer_jede):
             w.setEnabled(frei)
         for _, hk in self.spannungen:
             hk.setEnabled(frei and self.alle_v.isChecked())
@@ -494,7 +519,7 @@ class KabelReiter(QWidget):
             # jede Spannung bis zum Prüfstrom - höchstens so viel, wie der DL24 an Leistung schafft
             stufen = [(v, round(min(e.nenn_a, nt.DL24_MAX_W / v * 0.98), 2)) for v in volt]
             self.ablauf = nt.TriggerAblauf(e, stufen, self.f.geraet, bei_ereignis=melden)
-            if e.dauertest:
+            if e.dauertest and not self.dauer_jede.isChecked():
                 # Dauertest nur einmal, bei der niedrigsten Spannung: die Wärme im Kabel hängt nur vom
                 # Strom ab, und das Netzteil heizt den Stecker dort am wenigsten mit
                 tief = min(volt)
@@ -518,6 +543,31 @@ class KabelReiter(QWidget):
         self._ref = None
         ref = self.ref_name.text().strip()
         pruefling = self.name.text().strip() or "das zu prüfende Kabel"
+        gespeichert = self.ref_wahl.currentData() if self.mit_ref.isChecked() else None
+        if gespeichert:
+            werte = gespeichert["werte"]
+            if isinstance(werte, dict):
+                werte = {float(v): m for v, m in werte.items()}
+                fehlt = [v for v in self._volt() if v not in werte]
+                if not self._volt() or fehlt:
+                    QMessageBox.information(self, "Kabel prüfen", "Die gespeicherte Referenz passt nicht zu den "
+                                            "gewählten Spannungen" + (f" (fehlt: {', '.join(f'{v:g} V' for v in fehlt)})"
+                                                                      if fehlt else "") +
+                                            ". Andere Referenz wählen oder neu messen.")
+                    return
+            elif self._volt():
+                QMessageBox.information(self, "Kabel prüfen", "Diese Referenz wurde nur bei einer Spannung gemessen – "
+                                        "für alle Spannungen neu messen.")
+                return
+            if not self.f._frage("Gespeicherte Referenz",
+                                 f"Referenz: {self._ref_text(gespeichert)}\n\nDie gilt nur mit demselben Netzteil "
+                                 f"(„{gespeichert.get('netzteil') or '?'}“) und demselben Adapter.\n\n"
+                                 f"Jetzt „{pruefling}“ einstecken:\n    Netzteil → {pruefling} → Trigger-Adapter → "
+                                 "DL24\n\nSteckt es so?"):
+                return
+            self._ref = werte
+            self._kabel_phase()
+            return
         if self.mit_ref.isChecked() and not self.f._frage(
                 "Schritt 1: Referenz",
                 ("Zuerst die Referenz – dafür das REFERENZKABEL einstecken:\n\n"
@@ -623,7 +673,7 @@ class KabelReiter(QWidget):
             # danach kommt noch der ganze Durchgang mit Kabel
             e = self._einstellung(ref=False)
             n = len(self._volt()) or 1
-            ohne = dataclasses.replace(e, dauertest=False)
+            ohne = e if self.dauer_jede.isChecked() else dataclasses.replace(e, dauertest=False)
             rest += nt.geplant_s(e) + (n - 1) * nt.geplant_s(ohne) + (30 * n if self._volt() else 0) + 30
         if rest is not None:
             teile.append(f"noch etwa {dauer_text(rest)} gesamt")
@@ -657,6 +707,7 @@ class KabelReiter(QWidget):
                 self.f._zustand_zeigen()
                 return
             self._ref = r.widerstand_mohm
+            self._referenz_speichern(self._ref)
             self._handeln("⚠ " + self._wechsel_text(f"{self._ref:.0f} mΩ", self._ref))
             self.knopf_start.hide()
             self.knopf_weiter.show()
@@ -710,6 +761,7 @@ class KabelReiter(QWidget):
             return
         if self.phase == "ref":
             self._ref = werte
+            self._referenz_speichern(werte)
             self._handeln("⚠ " + self._wechsel_text(", ".join(f"{v:g} V: {w:.0f} mΩ" for v, w in werte.items()),
                                                     max(werte.values()))
                           + f" Den Trigger-Adapter wieder auf {min(werte):g} V stellen.")
@@ -786,6 +838,56 @@ class KabelReiter(QWidget):
                 r.kabel_typ.setCurrentIndex(i)
         self.f.b.ereignis.emit("info", f"Kabelwert {d['kabel_mohm']:.0f} mΩ übernommen – gilt für Netzteile und "
                                        "Powerbanks")
+
+    # -- gespeicherte Referenzen -------------------------------------------
+    def _ref_datei(self):
+        return datenordner() / "kabel_referenzen.json"
+
+    def _referenzen(self) -> list:
+        try:
+            return json.loads(self._ref_datei().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return []
+
+    @staticmethod
+    def _ref_text(r: dict) -> str:
+        werte = r["werte"]
+        w = (", ".join(f"{float(v):g} V: {m:.0f} mΩ" for v, m in sorted(werte.items(), key=lambda x: float(x[0])))
+             if isinstance(werte, dict) else f"{werte:.0f} mΩ")
+        return (f"{r.get('ref_name') or 'ohne Kabel'} · {r.get('netzteil') or 'Netzteil ?'} · "
+                f"{datetime.fromtimestamp(r['wann']):%d.%m.%Y} – {w}")
+
+    def referenzen_laden(self) -> None:
+        self.ref_wahl.blockSignals(True)
+        self.ref_wahl.clear()
+        self.ref_wahl.addItem("Neu messen (Schritt 1)", None)
+        for r in self._referenzen():
+            self.ref_wahl.addItem(self._ref_text(r), r)
+        self.ref_wahl.blockSignals(False)
+        self._ref_gewaehlt()
+
+    def _ref_gewaehlt(self, *_) -> None:
+        r = self.ref_wahl.currentData()
+        self.knopf_ref_weg.setEnabled(r is not None)
+        if r:
+            self.ref_name.setText(r.get("ref_name") or "")
+            self.netzteil.setText(r.get("netzteil") or "")
+
+    def _referenz_speichern(self, werte) -> None:
+        eintrag = {"wann": time.time(), "ref_name": self.ref_name.text().strip(),
+                   "netzteil": self.netzteil.text().strip(), "strom": self.strom.value(),
+                   "werte": {str(v): w for v, w in werte.items()} if isinstance(werte, dict) else werte}
+        liste = [eintrag] + self._referenzen()
+        self._ref_datei().write_text(json.dumps(liste[:30], ensure_ascii=False), encoding="utf-8")
+        self.referenzen_laden()
+
+    def referenz_loeschen(self) -> None:
+        r = self.ref_wahl.currentData()
+        if not r or not self.f._frage("Referenz löschen", f"Gespeicherte Referenz löschen?\n\n{self._ref_text(r)}"):
+            return
+        liste = [x for x in self._referenzen() if x["wann"] != r["wann"]]
+        self._ref_datei().write_text(json.dumps(liste, ensure_ascii=False), encoding="utf-8")
+        self.referenzen_laden()
 
     def _datei(self):
         return datenordner() / "kabel.json"

@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.61 – 17.11.2026
+
+- **Dauertest bei jeder Spannung:** neuer Haken (an, gemerkt) – über den
+  Trigger-Adapter läuft der Dauertest bei jeder gewählten Spannung bis stabil.
+  Ohne Haken nur einmal bei der niedrigsten.
+- **Gespeicherte Referenzen:** Jede gemessene Referenz wird mit Referenzkabel,
+  Netzteil (neues Feld) und Datum gespeichert und lässt sich wieder wählen –
+  dann entfällt Schritt 1. Passt sie nicht zu den gewählten Spannungen, sagt
+  die App das. Gespeicherte Referenzen lassen sich löschen.
+
 ## 1.0.60 – 17.11.2026
 
 - **Kabeltest mit Dauertest:** standardmäßig an und gemerkt – erst bei

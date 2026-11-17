@@ -554,6 +554,14 @@ def test_kabeltester():
     assert 80 <= d["kabel_mohm"] <= 120 and d["ampel"] == "gruen" and d["nenn_a"] == 3.0, d
     assert "Taugt bis" in kt.ergebnis.text() and "3 A – mehr ist" in kt.ergebnis.text()
     assert "Referenzkabel „Kurz 15 cm“" in kt.ergebnis.text()
+    # die Referenz wurde gespeichert - beim nächsten Mal ohne Schritt 1
+    assert kt.ref_wahl.count() == 2 and "Kurz 15 cm" in kt.ref_wahl.itemText(1)
+    kt.ref_wahl.setCurrentIndex(1)
+    kt.starten()
+    assert kt.phase == "kabel" and kt.laeuft and 100 <= kt._ref <= 140
+    kt.abbrechen()
+    assert warten(lambda: not kt.laeuft, 10)
+    kt.ref_wahl.setCurrentIndex(0)
     assert "Geprüft mit" in kt.ergebnis.text() and "W</b> (2,00 A" in kt.ergebnis.text(), kt.ergebnis.text()
     assert kt.tabelle.rowCount() == 1 and "Testkabel" in kt.tabelle.item(0, 1).text()
     foto(f, "16-kabeltester")
@@ -578,13 +586,20 @@ def test_kabeltester():
     kt.alle_v.setChecked(True)
     for v, h in kt.spannungen:
         h.setChecked(v in (5.0, 9.0))
-    # mit Dauertest: nur bei der niedrigsten Spannung
+    # mit Dauertest: standardmäßig bei jeder Spannung, wahlweise nur bei der niedrigsten
     kt.mit_dauer.setChecked(True)
     kt.phase = "kabel"
+    assert kt.dauer_jede.isChecked()
+    kt._lauf(kt._einstellung(ref=False))
+    ab = kt.ablauf
+    assert ab.einstellung_fuer(5.0, 2.0).dauertest and ab.einstellung_fuer(9.0, 2.0).dauertest
+    ab.abbrechen()
+    kt.dauer_jede.setChecked(False)
     kt._lauf(kt._einstellung(ref=False))
     ab = kt.ablauf
     assert ab.einstellung_fuer(5.0, 2.0).dauertest and not ab.einstellung_fuer(9.0, 2.0).dauertest
     ab.abbrechen()
+    kt.dauer_jede.setChecked(True)
     kt.mit_dauer.setChecked(False)
     kt.strom.setValue(2.0)
     import threading as th, time as tm
