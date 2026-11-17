@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.49 – 17.11.2026
+
+- **Bericht bei „unbekannt – ermitteln“:** Statt „Bei 15 Volt: . Auf dem
+  Gerät …“ steht jetzt „Ermittelt.“, und oben „Ermittelt: liefert bis … W“
+  statt einer leeren Überschrift.
+
 ## 1.0.48 – 17.11.2026
 
 - **Diagramm bleibt bei der laufenden Prüfung:** War vom vorigen Test noch

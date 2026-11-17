@@ -61,6 +61,14 @@ def urteil_html(r: dict, fach: bool = False) -> list[str]:
     return aus
 
 
+def _nur_ermittelt(e: dict, r: dict) -> bool:
+    """Stand nichts drauf und wurde nur gemessen - dann gibt es kein Urteil."""
+    teile = r.get("teile")
+    if teile:
+        return all(t["einstellung"].get("unbekannt") for t in teile if not t["einstellung"].get("kapazitaet"))
+    return bool(e.get("unbekannt"))
+
+
 def kurz_html(e: dict, r: dict) -> str:
     """„Kurz gesagt“ für den Bericht: Urteil groß, dann einfache Sätze."""
     zeilen = []
@@ -68,6 +76,12 @@ def kurz_html(e: dict, r: dict) -> str:
     if u in URTEILE:
         wort, farbe = URTEILE[u]
         zeilen.append(f"<p style='font-size:20px; color:{farbe}'><b>{wort}</b></p>")
+    elif _nur_ermittelt(e, r):
+        # nichts angegeben, nur gemessen: kein Urteil, aber eine klare Überschrift
+        best = [nt.bestleistung(t["ergebnis"]) for t in r.get("teile") or [{"ergebnis": r}]]
+        best = [b[0] for b in best if b]
+        zeilen.append("<p style='font-size:20px; color:#555'><b>Ermittelt"
+                      + (f": liefert bis {zahl(max(best), 1)} W" if best else "") + "</b></p>")
     if "teile" in r:
         teile, nicht = r.get("teile") or [], r.get("nicht") or []
         hoch = [t for t in teile if t["einstellung"]["nenn_v"] > 5.5]
@@ -82,10 +96,11 @@ def kurz_html(e: dict, r: dict) -> str:
                           + ".</p>")
         for t in teile:
             te, tr = t["einstellung"], t["ergebnis"]
-            wort = URTEILE.get(tr.get("urteil"), ("", ""))[0]
+            wort = URTEILE.get(tr.get("urteil"), ("", ""))[0] or ("Ermittelt" if te.get("unbekannt") else "")
             text = " ".join(tr.get("laien") or [])
             titel = "Kapazität (bis leer bei 5 Volt)" if te.get("kapazitaet") else f"Bei {_kurz(te['nenn_v'])} Volt"
-            zeilen.append(f"<p><b>{titel}:</b> {html.escape(wort)}. {html.escape(text)}</p>")
+            zeilen.append(f"<p><b>{titel}:</b> " + (f"{html.escape(wort)}. " if wort else "")
+                          + f"{html.escape(text)}</p>")
     else:
         for satz in r.get("laien") or []:
             zeilen.append(f"<p>{html.escape(satz)}</p>")

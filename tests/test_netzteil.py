@@ -404,6 +404,16 @@ def test_normen_im_bericht():
     assert bild.width() >= 90 and bild.width() == bild.height()
 
 
+def test_kurz_bei_nur_ermittelt():
+    from akkutest.netzteil_reiter import kurz_html
+    tr = {"urteil": None, "laien": ["Auf dem Gerät steht nicht, wie viel es kann."],
+          "stufen": [{"spannung": 15.0, "strom": 3.6, "ok": True, "soll_a": 3.75}]}
+    r = {"urteil": None, "teile": [{"einstellung": {"nenn_v": 15.0, "unbekannt": True}, "ergebnis": tr}],
+         "nicht": []}
+    h = kurz_html({}, r)
+    assert "Ermittelt: liefert bis 54,0 W" in h and "Volt:</b> Ermittelt. Auf dem" in h and ": . " not in h, h
+
+
 def test_zu_hohe_spannung():
     q = SimNetzteil(5.6, innen_mohm=50, abschalt_a=9)
     e = nt.NetzteilEinstellung("Billig", 5.0, 1.0, stufen=2, stufe_s=10, dauertest=False, toleranz_proz=20)
