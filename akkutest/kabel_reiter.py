@@ -14,6 +14,7 @@ außen am Steckergehäuse über den VBUS-/GND-Kontakten, gewartet bis die Temper
 """
 from __future__ import annotations
 
+import dataclasses
 import html
 import json
 import logging
@@ -37,6 +38,10 @@ log = logging.getLogger("akkutest.kabel")
 
 AMPEL = {"gruen": "#2e9e4f", "gelb": "#c77700", "rot": "#d03b3b"}
 ERWAERMUNG_MAX_K = 30.0      # USB Type-C Compliance Document B-6-1
+# Hinweise im Schritt-Feld: normal - und auffällig, wenn etwas von Hand zu tun ist
+NORMAL = "font-weight: bold;"
+AUFFAELLIG = ("font-weight: bold; font-size: 15px; background:#fff1d6; color:#7a4b00; padding:10px; "
+              "border: 2px solid #e0a000; border-radius:6px;")
 REF_GUT_MOHM = 80.0          # Netzteil + Referenzkabel sollten darunter liegen, sonst taugt die Referenz kaum
 
 
@@ -307,7 +312,9 @@ class KabelReiter(QWidget):
         self.alle_v.toggled.connect(lambda an: [hk.setEnabled(an) for _, hk in self.spannungen])
         for _, hk in self.spannungen:
             hk.setEnabled(False)
-        self.mit_dauer = QCheckBox("Dauertest beim Prüfstrom, Minuten:")
+        self.mit_dauer = QCheckBox("Dauertest bis stabil, höchstens Minuten:")
+        self.mit_dauer.setToolTip("Erst bei Dauerlast wird ein Kabel warm. Endet, sobald die Temperatur stabil ist. "
+                                  "Über den Trigger-Adapter nur einmal – bei der niedrigsten Spannung.")
         self.dauer_min = QSpinBox()
         self.dauer_min.setRange(1, 120)
         self.dauer_min.setValue(30)
@@ -333,6 +340,9 @@ class KabelReiter(QWidget):
         self.mit_fuehler.setChecked(str(self._einst.value("kt/fuehler", "true")).lower() == "true")
         self.temp_grenze.setValue(int(float(self._einst.value("kt/temp_grenze", 50) or 50)))
         self.mit_fuehler.toggled.connect(lambda an: self._einst.setValue("kt/fuehler", an))
+        # ohne Dauertest sieht man keinen Temperaturanstieg - standardmäßig an, gemerkt
+        self.mit_dauer.setChecked(str(self._einst.value("kt/dauer", "true")).lower() == "true")
+        self.mit_dauer.toggled.connect(lambda an: self._einst.setValue("kt/dauer", an))
         self.ref_name.setText(str(self._einst.value("kt/ref_name", "") or ""))
         self.ref_name.textChanged.connect(lambda s: self._einst.setValue("kt/ref_name", s))
         self.temp_grenze.valueChanged.connect(lambda w: self._einst.setValue("kt/temp_grenze", w))
@@ -362,8 +372,12 @@ class KabelReiter(QWidget):
         links.addLayout(knoepfe)
         self.schritt = QLabel()
         self.schritt.setWordWrap(True)
-        self.schritt.setStyleSheet("font-weight: bold;")
+        self.schritt.setStyleSheet(NORMAL)
         links.addWidget(self.schritt)
+        self.zeit = QLabel()                  # Prüfdauer: wie lange schon, wie lange noch
+        self.zeit.setWordWrap(True)
+        self.zeit.setStyleSheet(gedaempft())
+        links.addWidget(self.zeit)
         links.addStretch(1)
         lw = QWidget()
         lw.setLayout(links)
@@ -480,6 +494,13 @@ class KabelReiter(QWidget):
             # jede Spannung bis zum Prüfstrom - höchstens so viel, wie der DL24 an Leistung schafft
             stufen = [(v, round(min(e.nenn_a, nt.DL24_MAX_W / v * 0.98), 2)) for v in volt]
             self.ablauf = nt.TriggerAblauf(e, stufen, self.f.geraet, bei_ereignis=melden)
+            if e.dauertest:
+                # Dauertest nur einmal, bei der niedrigsten Spannung: die Wärme im Kabel hängt nur vom
+                # Strom ab, und das Netzteil heizt den Stecker dort am wenigsten mit
+                tief = min(volt)
+                ablauf = self.ablauf
+                ablauf.einstellung_fuer = lambda v, a, _alt=ablauf.einstellung_fuer: (
+                    _alt(v, a) if v == tief else dataclasses.replace(_alt(v, a), dauertest=False))
         else:
             self.ablauf = nt.NetzteilAblauf(e, self.f.geraet, bei_ereignis=melden)
         self.linie.setData([], [])
@@ -518,6 +539,7 @@ class KabelReiter(QWidget):
             self._kabel_phase()
 
     def _kabel_phase(self) -> None:
+        self.schritt.setStyleSheet(NORMAL)
         self.knopf_weiter.hide()
         self.knopf_start.show()
         self.phase = "kabel"
@@ -569,19 +591,49 @@ class KabelReiter(QWidget):
                     ref = ref.get(teil.einstellung.nenn_v, 0)
                 kabel = w - (ref or 0) if self.phase == "kabel" else w
                 self.anz["r"].setzen(f"{max(0, kabel):.0f} mΩ" + (" (Netzteil)" if self.phase == "ref" else ""))
+        self._zeit_zeigen(ab, teil, m)
         p = list(ab.punkte)
         self.linie.setData([x[0] / 60 for x in p], [x[1] for x in p])
         mit = [(x[0] / 60, x[3]) for x in p if x[3] is not None]
         self.linie_t.setData([a for a, _ in mit], [b for _, b in mit])
         self.bild_t.setVisible(bool(mit))
 
+    def _zeit_zeigen(self, ab, teil, m: Messwert) -> None:
+        """Wie lange läuft die Prüfung schon, was kommt noch, wie lange noch etwa."""
+        from .fenster import dauer_text
+        if not ab.laeuft:
+            self.zeit.setText("")
+            return
+        seit = ab.punkte[-1][0] if ab.punkte else 0
+        teile = [f"Läuft seit {dauer_text(seit)}"]
+        rest = None
+        if isinstance(teil, nt.NetzteilAblauf) and teil.laeuft:
+            r = teil.restzeit(m.zeit)
+            if r:
+                rest = r[1]
+                s = teil.schritt
+                if s:
+                    teile.append(f"Stufe {teil.i + 1} von {len(teil.schritte)} · {s.soll_a:.2f} A".replace(".", ","))
+        if isinstance(ab, nt.TriggerAblauf):
+            weiter = ab.stufen[ab.i + 1:] if ab.i >= 0 else ab.stufen
+            if ab.ziel:
+                teile.append(f"Spannung {min(ab.i + 1, len(ab.stufen))} von {len(ab.stufen)} ({ab.ziel[0]:g} V)")
+            rest = (rest or 0) + sum(nt.geplant_s(ab.einstellung_fuer(v, a)) + 30 for v, a in weiter)
+        if self.phase == "ref" and rest is not None:
+            # danach kommt noch der ganze Durchgang mit Kabel
+            e = self._einstellung(ref=False)
+            n = len(self._volt()) or 1
+            ohne = dataclasses.replace(e, dauertest=False)
+            rest += nt.geplant_s(e) + (n - 1) * nt.geplant_s(ohne) + (30 * n if self._volt() else 0) + 30
+        if rest is not None:
+            teile.append(f"noch etwa {dauer_text(rest)} gesamt")
+        self.zeit.setText(" · ".join(teile))
+
     def ereignis(self, art: str, text: str) -> None:
         if art == "umschalten":
-            from PySide6.QtWidgets import QApplication
-            self.schritt.setText(("Referenz: " if self.phase == "ref" else "Mit Kabel: ") + text)
-            QApplication.beep()
-            QApplication.alert(self.f)
+            self._handeln(("⚠ Referenz: " if self.phase == "ref" else "⚠ Mit Kabel: ") + text)
             return
+        self.schritt.setStyleSheet(NORMAL)
         if art in ("schritt", "info"):
             vorn = "Schritt 1 von 2 (Referenz): " if self.phase == "ref" else (
                 "Schritt 2 von 2 (mit Kabel): " if self._ref is not None else "Mit Kabel: ")
@@ -605,11 +657,9 @@ class KabelReiter(QWidget):
                 self.f._zustand_zeigen()
                 return
             self._ref = r.widerstand_mohm
-            self.schritt.setText(self._wechsel_text(f"{self._ref:.0f} mΩ", self._ref))
+            self._handeln("⚠ " + self._wechsel_text(f"{self._ref:.0f} mΩ", self._ref))
             self.knopf_start.hide()
             self.knopf_weiter.show()
-            from PySide6.QtWidgets import QApplication
-            QApplication.beep()
             self.f._zustand_zeigen()
             return
         if r.widerstand_mohm is None:
@@ -626,7 +676,16 @@ class KabelReiter(QWidget):
         self._zeigen(d)
         self._speichern(d)
         self.schritt.setText(f"Fertig: Kabel {d['kabel_mohm']:.0f} mΩ")
+        self.zeit.setText(f"Prüfdauer {_min(d['bedingungen']['dauer_s'])}" if d.get("bedingungen") else "")
         self.f._zustand_zeigen()
+
+    def _handeln(self, text: str) -> None:
+        """Jetzt muss der Mensch etwas tun: groß, farbig, mit Ton und Blinken in der Taskleiste."""
+        from PySide6.QtWidgets import QApplication
+        self.schritt.setText(text)
+        self.schritt.setStyleSheet(AUFFAELLIG)
+        QApplication.beep()
+        QApplication.alert(self.f)
 
     def _wechsel_text(self, wert: str, hoechst: float) -> str:
         ref = self.ref_name.text().strip()
@@ -651,13 +710,11 @@ class KabelReiter(QWidget):
             return
         if self.phase == "ref":
             self._ref = werte
-            self.schritt.setText(self._wechsel_text(", ".join(f"{v:g} V: {w:.0f} mΩ" for v, w in werte.items()),
+            self._handeln("⚠ " + self._wechsel_text(", ".join(f"{v:g} V: {w:.0f} mΩ" for v, w in werte.items()),
                                                     max(werte.values()))
-                                 + f" Den Trigger-Adapter wieder auf {min(werte):g} V stellen.")
+                          + f" Den Trigger-Adapter wieder auf {min(werte):g} V stellen.")
             self.knopf_start.hide()
             self.knopf_weiter.show()
-            from PySide6.QtWidgets import QApplication
-            QApplication.beep()
             self.f._zustand_zeigen()
             return
         ref = self._ref if isinstance(self._ref, dict) else {}
@@ -698,6 +755,7 @@ class KabelReiter(QWidget):
         self._zeigen(d)
         self._speichern(d)
         self.schritt.setText(f"Fertig: Kabel {d['kabel_mohm']:.0f} mΩ (Mittel über {len(je)} Spannungen)")
+        self.zeit.setText(f"Prüfdauer {_min(d['bedingungen']['dauer_s'])}" if d.get("bedingungen") else "")
         self.f._zustand_zeigen()
 
     # ------------------------------------------------------------------

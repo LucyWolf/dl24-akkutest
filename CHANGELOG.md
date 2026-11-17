@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.60 – 17.11.2026
+
+- **Kabeltest mit Dauertest:** standardmäßig an und gemerkt – erst bei
+  Dauerlast steigt die Temperatur am Stecker. Endet, sobald sie stabil ist.
+  Über den Trigger-Adapter läuft er nur einmal, bei der niedrigsten Spannung
+  (die Wärme im Kabel hängt nur vom Strom ab).
+- **Prüfdauer im Kabel-Reiter:** „Läuft seit … · Stufe x von y · Spannung …
+  · noch etwa … gesamt“, inklusive des zweiten Durchgangs mit Kabel.
+- **Umschalten und Kabelwechsel auffällig:** großer oranger Kasten, Ton und
+  Blinken in der Taskleiste.
+
 ## 1.0.59 – 17.11.2026
 
 - **Update erst anbieten, wenn es fertig ist:** Das Windows-Setup hängt erst

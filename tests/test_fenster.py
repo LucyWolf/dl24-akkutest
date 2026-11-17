@@ -532,6 +532,8 @@ def test_kabeltester():
     f.verbinden_umschalten()
     assert warten(lambda: f.geraet is not None and f.letzter is not None), meldungen
     kt = f.kt
+    assert kt.mit_dauer.isChecked()                    # Dauertest standardmäßig an
+    kt.mit_dauer.setChecked(False)                     # hier zu lang
     kt.name.setText("Testkabel")
     kt.ref_name.setText("Kurz 15 cm")
     kt.strom.setValue(2.0)
@@ -539,8 +541,10 @@ def test_kabeltester():
     kt.starten()
     assert kt.laeuft and not f.nt.knopf_start.isEnabled()
     assert warten(lambda: kt.bild_t.isVisible(), 30)              # Temperatur schon während der Referenz
+    assert warten(lambda: "Läuft seit" in kt.zeit.text() and "noch etwa" in kt.zeit.text(), 10), kt.zeit.text()
     assert warten(lambda: kt.knopf_weiter.isVisible(), 60), kt.schritt.text()
     assert 100 <= kt._ref <= 140 and "„Kurz 15 cm“ HERAUSZIEHEN" in kt.schritt.text(), kt.schritt.text()
+    assert "background:#fff1d6" in kt.schritt.styleSheet()        # auffällig: jetzt muss jemand etwas tun
     assert "⚠ Die Referenz hat" in kt.schritt.text()          # 120 mΩ: über 80 mΩ
     f.geraet.v.geraet.akku.innen += 0.100          # jetzt steckt ein Kabel mit 100 mΩ dazwischen
     kt.knopf_weiter.click()
@@ -574,6 +578,14 @@ def test_kabeltester():
     kt.alle_v.setChecked(True)
     for v, h in kt.spannungen:
         h.setChecked(v in (5.0, 9.0))
+    # mit Dauertest: nur bei der niedrigsten Spannung
+    kt.mit_dauer.setChecked(True)
+    kt.phase = "kabel"
+    kt._lauf(kt._einstellung(ref=False))
+    ab = kt.ablauf
+    assert ab.einstellung_fuer(5.0, 2.0).dauertest and not ab.einstellung_fuer(9.0, 2.0).dauertest
+    ab.abbrechen()
+    kt.mit_dauer.setChecked(False)
     kt.strom.setValue(2.0)
     import threading as th, time as tm
     halt = th.Event()
@@ -591,6 +603,7 @@ def test_kabeltester():
     quelle.nenn_v = 5.0
     kt.starten()
     assert warten(lambda: kt.knopf_weiter.isVisible(), 90), kt.schritt.text()
+    assert "Spannung" in kt.zeit.text() or kt.zeit.text() == "", kt.zeit.text()
     assert isinstance(kt._ref, dict) and set(kt._ref) == {5.0, 9.0}, kt._ref
     quelle.innen += 0.080
     quelle.nenn_v = 5.0
