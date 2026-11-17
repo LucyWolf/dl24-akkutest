@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.59 – 17.11.2026
+
+- **Update erst anbieten, wenn es fertig ist:** Das Windows-Setup hängt erst
+  ein paar Minuten nach dem Release dran. Bis dahin meldet die App „wird
+  gerade bereitgestellt“ statt einer neuen Version, die dann beim
+  Aktualisieren fehlschlug.
+- **Kabeltest:** Die Temperatur wird auch während der Referenz aufgezeichnet
+  und angezeigt.
+
 ## 1.0.58 – 17.11.2026
 
 - **Kabelbericht mit richtigem Diagramm:** eigens gezeichnet, hell und in

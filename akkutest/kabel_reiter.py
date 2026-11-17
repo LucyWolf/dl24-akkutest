@@ -461,8 +461,10 @@ class KabelReiter(QWidget):
     def _einstellung(self, ref: bool) -> nt.NetzteilEinstellung:
         a = round(self.strom.value(), 2)
         if ref:
+            # Temperatur auch hier aufzeichnen - sonst fehlt der Streifen während der Referenz
             return nt.NetzteilEinstellung("Referenz ohne Kabel", 5.0, a, stufen=4, stufe_s=10, dauertest=False,
-                                          abschalttest=False, fuehler=False, temp_grenze=90)
+                                          abschalttest=False, fuehler=self.mit_fuehler.isChecked(),
+                                          temp_grenze=self.temp_grenze.value())
         return nt.NetzteilEinstellung(self.name.text().strip() or "Kabel", 5.0, a, stufen=5, stufe_s=15,
                                       dauertest=self.mit_dauer.isChecked(), dauer_proz=100, bis_stabil=True,
                                       dauer_min=self.dauer_min.value(), abschalttest=False,

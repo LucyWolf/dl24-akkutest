@@ -75,6 +75,12 @@ def pruefen() -> dict:
         r = neuestes_release()
         stand["verfuegbar"] = r["version"] or None
         stand["neuer"] = version_tupel(r["version"]) > version_tupel(VERSION)
+        # Das Release entsteht in zwei Schritten - das Windows-Setup hängt erst ein paar Minuten später
+        # dran. Bis dahin nicht anbieten, sonst schlägt "Jetzt aktualisieren" fehl.
+        noetig = SETUP if sys.platform == "win32" else LINUX_DATEI
+        if stand["neuer"] and noetig not in r["anhaenge"]:
+            stand["neuer"] = False
+            stand["bereitgestellt"] = r["version"]
     except urllib.error.HTTPError as f:
         stand["fehler"] = (f"GitHub lässt gerade keine Anfragen zu ({f.code}) – später noch einmal versuchen"
                            if f.code in (403, 429) else f"GitHub antwortet mit {f.code}")
@@ -110,7 +116,8 @@ def einspielen() -> str:
     name = SETUP if fenster else LINUX_DATEI
     anhang = r["anhaenge"].get(name)
     if not anhang:
-        raise RuntimeError(f"Am Release hängt keine {name}")
+        raise RuntimeError(f"Version {r['version']} wird gerade noch bereitgestellt – in ein paar Minuten noch "
+                           "einmal versuchen.")
     soll = _soll_summe(r["anhaenge"], name)
     if not soll:
         raise RuntimeError("Für die Datei gibt es keine Prüfsumme – Update abgebrochen")

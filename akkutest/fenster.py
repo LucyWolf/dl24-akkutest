@@ -225,6 +225,8 @@ class Fenster(QMainWindow):
             self.update_leiste.show()
         elif von_hand:
             text = (f"Keine Verbindung zu GitHub: {stand['fehler']}" if stand.get("fehler")
+                    else f"Version {stand['bereitgestellt']} wird gerade bereitgestellt – in ein paar Minuten "
+                         "noch einmal nachsehen." if stand.get("bereitgestellt")
                     else f"Du hast die neueste Version ({stand['installiert']}).")
             self.b.ereignis.emit("warnung" if stand.get("fehler") else "info", text)
 

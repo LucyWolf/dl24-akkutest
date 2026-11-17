@@ -29,6 +29,10 @@ def test_pruefen():
         assert s["neuer"] and s["verfuegbar"] == "99.0.0" and not s["fehler"]
         a.neuestes_release = lambda: release(a.VERSION, b"x")
         assert not a.pruefen()["neuer"]
+        # Installationsdatei hängt noch nicht dran: nicht anbieten, sondern "wird bereitgestellt"
+        a.neuestes_release = lambda: {"version": "99.0.0", "notizen": "", "anhaenge": {}}
+        s = a.pruefen()
+        assert not s["neuer"] and s["bereitgestellt"] == "99.0.0"
     finally:
         a.neuestes_release = alt
 

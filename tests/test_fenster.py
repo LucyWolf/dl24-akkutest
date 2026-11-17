@@ -538,6 +538,7 @@ def test_kabeltester():
     assert kt.knopf_start.isEnabled()
     kt.starten()
     assert kt.laeuft and not f.nt.knopf_start.isEnabled()
+    assert warten(lambda: kt.bild_t.isVisible(), 30)              # Temperatur schon während der Referenz
     assert warten(lambda: kt.knopf_weiter.isVisible(), 60), kt.schritt.text()
     assert 100 <= kt._ref <= 140 and "„Kurz 15 cm“ HERAUSZIEHEN" in kt.schritt.text(), kt.schritt.text()
     assert "⚠ Die Referenz hat" in kt.schritt.text()          # 120 mΩ: über 80 mΩ
