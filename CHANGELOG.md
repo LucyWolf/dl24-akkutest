@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.57 – 17.11.2026
+
+- **Kabeltest mit Referenzkabel:** Neues Feld „Referenzkabel“ (gemerkt). Die
+  App fordert zuerst „Referenzkabel einstecken“, nach der Referenz
+  „Referenzkabel herausziehen und das zu prüfende einstecken“ – jeweils mit
+  Namen. Liegt die Referenz über 80 mΩ, warnt sie, dass das Referenzkabel
+  wohl nicht gut genug ist. Der Bericht nennt das Referenzkabel und dass das
+  Ergebnis um dessen Widerstand zu klein ist.
+
 ## 1.0.56 – 17.11.2026
 
 - **Kabeltest nach USB-Norm:** Erwärmung nach USB Type-C Compliance

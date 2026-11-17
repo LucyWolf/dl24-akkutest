@@ -533,12 +533,14 @@ def test_kabeltester():
     assert warten(lambda: f.geraet is not None and f.letzter is not None), meldungen
     kt = f.kt
     kt.name.setText("Testkabel")
+    kt.ref_name.setText("Kurz 15 cm")
     kt.strom.setValue(2.0)
     assert kt.knopf_start.isEnabled()
     kt.starten()
     assert kt.laeuft and not f.nt.knopf_start.isEnabled()
     assert warten(lambda: kt.knopf_weiter.isVisible(), 60), kt.schritt.text()
-    assert 100 <= kt._ref <= 140 and "Referenz" in kt.schritt.text(), kt._ref
+    assert 100 <= kt._ref <= 140 and "„Kurz 15 cm“ HERAUSZIEHEN" in kt.schritt.text(), kt.schritt.text()
+    assert "⚠ Die Referenz hat" in kt.schritt.text()          # 120 mΩ: über 80 mΩ
     f.geraet.v.geraet.akku.innen += 0.100          # jetzt steckt ein Kabel mit 100 mΩ dazwischen
     kt.knopf_weiter.click()
     assert warten(lambda: not kt.laeuft and kt.ergebnis.isVisible(), 90), kt.schritt.text()
@@ -546,6 +548,7 @@ def test_kabeltester():
     print("Kabel:", d["kabel_mohm"], d["ref_mohm"], d["gesamt_mohm"], d["ampel"])
     assert 80 <= d["kabel_mohm"] <= 120 and d["ampel"] == "gruen" and d["nenn_a"] == 3.0, d
     assert "Taugt bis" in kt.ergebnis.text() and "3 A – mehr ist" in kt.ergebnis.text()
+    assert "Referenzkabel „Kurz 15 cm“" in kt.ergebnis.text()
     assert kt.tabelle.rowCount() == 1 and "Testkabel" in kt.tabelle.item(0, 1).text()
     foto(f, "16-kabeltester")
     kt.uebernehmen()

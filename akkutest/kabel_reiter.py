@@ -37,6 +37,7 @@ log = logging.getLogger("akkutest.kabel")
 
 AMPEL = {"gruen": "#2e9e4f", "gelb": "#c77700", "rot": "#d03b3b"}
 ERWAERMUNG_MAX_K = 30.0      # USB Type-C Compliance Document B-6-1
+REF_GUT_MOHM = 80.0          # Netzteil + Referenzkabel sollten darunter liegen, sonst taugt die Referenz kaum
 
 
 def auswerten(ref_mohm: float | None, gesamt_mohm: float, typ: str, temp_start: float | None = None,
@@ -85,8 +86,18 @@ def bericht_html(d: dict) -> str:
         tab.append(("", "<span style='color:#c77700'>ohne Referenzmessung – der Wert enthält auch den Widerstand "
                         "des Netzteils und ist daher etwas zu hoch</span>"))
     else:
-        tab.append(("Gemessen", f"{zahl(d['gesamt_mohm'], 0)} mΩ mit Kabel − {zahl(d['ref_mohm'], 0)} mΩ ohne "
-                                "Kabel (Referenz)"))
+        if d.get("ref_name"):
+            tab.append(("Gemessen", f"{zahl(d['gesamt_mohm'], 0)} mΩ mit Kabel − {zahl(d['ref_mohm'], 0)} mΩ Referenz "
+                                    f"(Netzteil + Referenzkabel „{html.escape(d['ref_name'])}“)<br><span "
+                                    "style='color:gray'>Das Ergebnis ist um den Widerstand des Referenzkabels zu klein "
+                                    "(bei einem kurzen, guten Kabel etwa 20–40 mΩ).</span>"))
+        else:
+            tab.append(("Gemessen", f"{zahl(d['gesamt_mohm'], 0)} mΩ mit Kabel − {zahl(d['ref_mohm'], 0)} mΩ ohne "
+                                    "Kabel (Referenz)"))
+        if (d.get("ref_mohm") or 0) > REF_GUT_MOHM:
+            tab.append(("", f"<span style='color:#c77700'>⚠ Referenz über {REF_GUT_MOHM:.0f} mΩ – das Referenzkabel "
+                            "oder das Netzteil taugt wohl kaum als Referenz; das Kabel ist eher schlechter als "
+                            "angegeben.</span>"))
     if d.get("grenze_mohm"):
         tab.append(("Erlaubt", f"höchstens {zahl(d['grenze_mohm'], 0)} mΩ für {html.escape(d['typ_name'])} "
                                "(USB Type-C §4.4.1 bzw. USB 2.0 §7.2.2)"))
@@ -192,6 +203,12 @@ class KabelReiter(QWidget):
         self.mit_ref.setToolTip("Zuerst das Netzteil über einen kurzen Adapter direkt am DL24 - dann wird sein "
                                 "eigener Widerstand vom Ergebnis abgezogen.")
         f.addRow(self.mit_ref)
+        self.ref_name = QLineEdit()
+        self.ref_name.setPlaceholderText("z. B. Anker USB-C 15 cm – leer lassen bei Adapter mit Stecker")
+        self.ref_name.setToolTip("Das kürzeste, beste Kabel, das du hast. Damit wird die Referenz gemessen – das "
+                                 "Ergebnis ist um seinen Widerstand zu klein. Immer dasselbe nehmen.")
+        f.addRow("Referenzkabel:", self.ref_name)
+        self.mit_ref.toggled.connect(self.ref_name.setEnabled)
         self.alle_v = QCheckBox("Alle Spannungen über den Trigger-Adapter prüfen:")
         self.alle_v.setToolTip("Referenz und Kabel werden bei jeder gewählten Spannung gemessen – die App sagt, "
                                "wann am Trigger-Adapter umgeschaltet wird.")
@@ -236,6 +253,8 @@ class KabelReiter(QWidget):
         self.mit_fuehler.setChecked(str(self._einst.value("kt/fuehler", "true")).lower() == "true")
         self.temp_grenze.setValue(int(float(self._einst.value("kt/temp_grenze", 50) or 50)))
         self.mit_fuehler.toggled.connect(lambda an: self._einst.setValue("kt/fuehler", an))
+        self.ref_name.setText(str(self._einst.value("kt/ref_name", "") or ""))
+        self.ref_name.textChanged.connect(lambda s: self._einst.setValue("kt/ref_name", s))
         self.temp_grenze.valueChanged.connect(lambda w: self._einst.setValue("kt/temp_grenze", w))
         hinweis = QLabel("<b>Ablauf:</b> 1. Netzteil <b>ohne</b> das Kabel am DL24 (Adapter mit USB-C-Stecker "
                          "oder kürzestes Kabel) – Referenz. 2. Das Kabel dazwischen stecken – Messung. Die "
@@ -394,21 +413,24 @@ class KabelReiter(QWidget):
             return
         self.ergebnis.hide()
         self._ref = None
+        ref = self.ref_name.text().strip()
+        pruefling = self.name.text().strip() or "das zu prüfende Kabel"
         if self.mit_ref.isChecked() and not self.f._frage(
-                "Schritt 1: Referenz ohne Kabel",
-                "Zuerst wird das Netzteil OHNE das zu prüfende Kabel gemessen.\n\n"
-                "So verbinden:\n"
-                "• am besten über einen Adapter mit USB-C-Stecker (z. B. Trigger-Adapter), der direkt im "
-                "Netzteil steckt – auf der anderen Seite am DL24,\n"
-                "• oder, ohne solchen Adapter, über das kürzeste und dickste Kabel, das du hast (10–20 cm). "
-                "Dann zählt es zur Referenz, das Ergebnis ist um seinen Widerstand zu klein.\n\n"
-                "Danach sagt die App, wann das zu prüfende Kabel dazwischen kommt.\n\n"
-                "Ist das Netzteil so am DL24 angeschlossen?"):
+                "Schritt 1: Referenz",
+                ("Zuerst die Referenz – dafür das REFERENZKABEL einstecken:\n\n"
+                 f"    Netzteil → {ref} → Trigger-Adapter → DL24\n\n"
+                 f"Noch NICHT „{pruefling}“.\n\n" if ref else
+                 "Zuerst die Referenz – das Netzteil OHNE Kabel am DL24:\n\n"
+                 "    Netzteil → Trigger-Adapter mit Stecker → DL24\n\n"
+                 "Hast du keinen Adapter mit Stecker, oben bei „Referenzkabel“ dein kürzestes, bestes Kabel "
+                 "eintragen und das einstecken.\n\n")
+                + "Danach sagt die App, wann das Kabel gewechselt wird.\n\nSteckt alles so?"):
             return
         if self.mit_ref.isChecked():
             self.phase = "ref"
-            self.schritt.setText("Schritt 1 von 2: Netzteil OHNE das zu prüfende Kabel am DL24 (Adapter mit Stecker "
-                                 "oder kürzestes Kabel). Referenz wird gemessen …")
+            ref = self.ref_name.text().strip()
+            self.schritt.setText("Schritt 1 von 2: Referenz " + (f"mit dem Referenzkabel „{ref}“" if ref else
+                                                                  "ohne Kabel") + " wird gemessen …")
             self._lauf(self._einstellung(ref=True))
         else:
             self._kabel_phase()
@@ -501,9 +523,7 @@ class KabelReiter(QWidget):
                 self.f._zustand_zeigen()
                 return
             self._ref = r.widerstand_mohm
-            self.schritt.setText(f"Referenz: Netzteil + Adapter {self._ref:.0f} mΩ.\n\nJetzt das zu prüfende Kabel "
-                                 "dazwischen stecken: Netzteil → Kabel → derselbe Adapter → DL24. Dann auf „weiter“ "
-                                 "drücken.")
+            self.schritt.setText(self._wechsel_text(f"{self._ref:.0f} mΩ", self._ref))
             self.knopf_start.hide()
             self.knopf_weiter.show()
             from PySide6.QtWidgets import QApplication
@@ -517,12 +537,26 @@ class KabelReiter(QWidget):
         d = auswerten(self._ref, r.widerstand_mohm, self.typ.currentData(), r.temp_start, r.temp_max)
         d["pruef_a"] = self.strom.value()
         d["stabil"] = r.temp_stabil
+        d["ref_name"] = self.ref_name.text().strip() if self._ref is not None else ""
         d.update(name=self.name.text().strip(), wann=time.time(), zu_heiss=r.zu_heiss,
                  kurve=[list(p) for p in nt.duennen(ab.punkte, 600)])
         self._zeigen(d)
         self._speichern(d)
         self.schritt.setText(f"Fertig: Kabel {d['kabel_mohm']:.0f} mΩ")
         self.f._zustand_zeigen()
+
+    def _wechsel_text(self, wert: str, hoechst: float) -> str:
+        ref = self.ref_name.text().strip()
+        pruefling = self.name.text().strip() or "das zu prüfende Kabel"
+        text = (f"Referenz ({'Netzteil + ' + ref if ref else 'Netzteil + Adapter'}): {wert}.\n\n"
+                + (f"Jetzt „{ref}“ HERAUSZIEHEN und „{pruefling}“ einstecken: " if ref else
+                   f"Jetzt „{pruefling}“ dazwischen stecken: ")
+                + f"Netzteil → {pruefling} → Trigger-Adapter → DL24. Dann auf „weiter“ drücken.")
+        if hoechst > REF_GUT_MOHM:
+            text += (f"\n\n⚠ Die Referenz hat {hoechst:.0f} mΩ – mehr als {REF_GUT_MOHM:.0f} mΩ. Das Referenzkabel "
+                     "(oder das Netzteil) ist wohl nicht gut genug; das Ergebnis fällt entsprechend zu klein aus. "
+                     "Besser mit einem kürzeren Kabel neu starten.")
+        return text
 
     def _fertig_spannungen(self, ab: nt.TriggerAblauf) -> None:
         """Über den Trigger-Adapter: je Spannung ein Widerstand."""
@@ -534,9 +568,9 @@ class KabelReiter(QWidget):
             return
         if self.phase == "ref":
             self._ref = werte
-            self.schritt.setText("Referenz fertig (" + ", ".join(f"{v:g} V: {w:.0f} mΩ" for v, w in werte.items())
-                                 + "). Jetzt das Kabel zwischen Netzteil und DL24 stecken (gleicher Adapter), den "
-                                   f"Trigger-Adapter wieder auf {min(werte):g} V stellen und auf „weiter“ drücken.")
+            self.schritt.setText(self._wechsel_text(", ".join(f"{v:g} V: {w:.0f} mΩ" for v, w in werte.items()),
+                                                    max(werte.values()))
+                                 + f" Den Trigger-Adapter wieder auf {min(werte):g} V stellen.")
             self.knopf_start.hide()
             self.knopf_weiter.show()
             from PySide6.QtWidgets import QApplication
@@ -569,6 +603,7 @@ class KabelReiter(QWidget):
         d["gesamt_mohm"] = sum(x[2] for x in je) / len(je)
         d["ref_mohm"] = d["gesamt_mohm"] - kabel
         d["stabil"] = any(t["ergebnis"].get("temp_stabil") for t in ab.ergebnis.teile)
+        d["ref_name"] = self.ref_name.text().strip() if ref else ""
         d.update(name=self.name.text().strip(), wann=time.time(), je_spannung=je, fehlt=fehlt,
                  pruef_a=self.strom.value(), kurve=[list(p) for p in nt.duennen(ab.punkte, 900)])
         self._zeigen(d)
