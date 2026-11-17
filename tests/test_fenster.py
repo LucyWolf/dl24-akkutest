@@ -528,6 +528,12 @@ def test_kabeltester():
     h = kr.bericht_html(warm)
     assert "Nicht in Ordnung: zu warm (+32,5 K" in h and "Taugt für die vollen" not in h, h
     assert "darüber wird es zu warm" in h
+    # an der Fühler-Grenze abgebrochen: nicht "bestanden", sondern offen
+    ab_h = dict(kr.auswerten(0, 202, "usbc3", 27.7, 40.0), pruef_a=3.0, stabil=False, wann=0, angabe_w=60,
+                zu_heiss=True, temp_grenze=40, je_spannung=[(20.0, 0, 202, 202, 3.0)])
+    h = kr.bericht_html(ab_h)
+    assert "nicht zu Ende gemessen" in h and "deine Grenze von 40 °C erreicht" in h, h
+    assert kr.angabe_pruefen(ab_h)[0] == "nicht" and "über 58 °C" in h and "Eigene Grenze 40 °C" in h, h
     offen = dict(gut, pruef_a=3.0, je_spannung=[(20.0, 0, 120, 120, 3.0)])
     g, punkte = kr.angabe_pruefen(offen)
     h = kr.bericht_html(offen)

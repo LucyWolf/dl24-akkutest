@@ -81,7 +81,7 @@ def kritisch(d: dict) -> tuple[float, str] | None:
     Wärme (Erwärmung wächst mit I², hochgerechnet auf +30 K) oder Spannungsabfall (750 mV)."""
     kandidaten = []
     k, strom = d.get("erwaermung_k"), d.get("pruef_a")
-    if k is not None and strom and k > 0.5:
+    if k is not None and strom and k > 0.5 and not abgebrochen(d):
         kandidaten.append((strom * (ERWAERMUNG_MAX_K / k) ** 0.5,
                            "durch Wärme (+30 K)" if d.get("stabil", True) else
                            "durch Wärme (+30 K) – vorläufig: die Temperatur war noch nicht stabil, für einen "
@@ -107,6 +107,11 @@ def zu_warm(d: dict) -> bool:
     return k is not None and k > ERWAERMUNG_MAX_K
 
 
+def abgebrochen(d: dict) -> bool:
+    """An der eingestellten Fühler-Grenze abgebrochen, bevor die Norm-Grenze erreicht war."""
+    return bool(d.get("zu_heiss")) and not zu_warm(d)
+
+
 def angabe_pruefen(d: dict) -> tuple[str, list[tuple[str, str, str]]] | None:
     """Hält das Kabel die Angabe? (Gesamt, [(Zeichen, Punkt, Begründung)]) - Zeichen ✔ ✘ ?"""
     w = d.get("angabe_w")
@@ -125,6 +130,11 @@ def angabe_pruefen(d: dict) -> tuple[str, list[tuple[str, str, str]]] | None:
     k, strom = d.get("erwaermung_k"), d.get("pruef_a") or 0
     if k is None:
         punkte.append(("?", f"Erwärmung bei {zahl(a, 0)} A", "nicht gemessen – ohne Temperaturfühler"))
+    elif abgebrochen(d):
+        punkte.append(("✘", f"Eigene Grenze {zahl(d.get('temp_grenze'), 0)} °C",
+                       f"erreicht bei {zahl(strom, 1)} A – das Kabel wurde zu heiß (+{zahl(k, 1)} K bis dahin)"))
+        punkte.append(("?", f"Erwärmung bei {zahl(a, 0)} A (Norm +30 K)",
+                       "nicht zu Ende gemessen – vorher an deiner Grenze abgebrochen"))
     elif strom < a - 1e-6:
         hoch = k * (a / strom) ** 2 if strom else None
         punkte.append(("?", f"Erwärmung bei {zahl(a, 0)} A",
@@ -185,7 +195,13 @@ def bericht_html(d: dict) -> str:
          f"Uhr · Typ: {html.escape(d.get('typ_name', ''))}"
          + (f" · Angabe: {d['angabe_w']} W" if d.get("angabe_w") else "") + "</p>"]
     z.append(angabe_html(d))
-    if zu_warm(d):
+    if abgebrochen(d):
+        z.append(f"<p style='font-size:17px; color:{AMPEL['rot']}'><b>Nicht in Ordnung: zu heiß – deine Grenze von "
+                 f"{zahl(d.get('temp_grenze'), 0)} °C erreicht"
+                 + (f" (nach {_min(d['bedingungen']['dauer_s'])})" if d.get("bedingungen") else "")
+                 + (f" – der Widerstand selbst ist in Ordnung ({zahl(d['kabel_mohm'], 0)} mΩ)"
+                    if d.get("ampel") == "gruen" else "") + "</b></p>")
+    elif zu_warm(d):
         # die Wärme entscheidet - ein guter Widerstand allein macht das Kabel nicht in Ordnung
         z.append(f"<p style='font-size:17px; color:{AMPEL['rot']}'><b>Nicht in Ordnung: zu warm "
                  f"(+{zahl(d['erwaermung_k'], 1)} K, erlaubt +{zahl(ERWAERMUNG_MAX_K, 0)} K) – der Widerstand selbst "
@@ -240,7 +256,15 @@ def bericht_html(d: dict) -> str:
             t += f" (Start {zahl(d['temp_start'], 1)} °C, +{zahl(d['temp_max'] - d['temp_start'], 1)} K)"
         tab.append(("Temperatur am Stecker", t))
         k = d.get("erwaermung_k")
-        if k is not None:
+        if k is not None and abgebrochen(d):
+            soll = (d["temp_start"] + ERWAERMUNG_MAX_K) if d.get("temp_start") is not None else None
+            tab.append(("Eigene Grenze", f"<b style='color:{AMPEL['rot']}'>✘ {zahl(d.get('temp_grenze'), 0)} °C erreicht"
+                                         f"</b> – zu heiß nach deiner Vorgabe (+{zahl(k, 1)} K über dem Start)"))
+            tab.append(("Erwärmung (Norm)", f"<b style='color:{AMPEL['gelb']}'>? nicht zu Ende gemessen</b> – vorher an "
+                                            "deiner Grenze abgebrochen."
+                                            + (f" Nach Norm wäre erst über {zahl(soll, 0)} °C (Start + 30 K) zu "
+                                               "warm." if soll else "")))
+        elif k is not None:
             ok = k <= ERWAERMUNG_MAX_K
             strom = d.get("pruef_a")
             voll = strom is None or strom >= d.get("nenn_a", 0) - 1e-6
@@ -456,7 +480,7 @@ class KabelReiter(QWidget):
         self.dauer_jede.setToolTip("Über den Trigger-Adapter: an = bei jeder gewählten Spannung bis stabil. "
                                    "Aus = nur einmal bei der niedrigsten - die Wärme im Kabel hängt nur vom Strom ab.")
         f.addRow(self.dauer_jede)
-        self.mit_fuehler = QCheckBox("Temperaturfühler am Stecker, Grenze:")
+        self.mit_fuehler = QCheckBox("Temperaturfühler am Stecker, zu heiß ab:")
         self.temp_grenze = QSpinBox()
         self.temp_grenze.setRange(30, 90)
         self.temp_grenze.setValue(50)
@@ -469,7 +493,7 @@ class KabelReiter(QWidget):
         from PySide6.QtCore import QSettings
         self._einst = QSettings("dl24-akkutest", "dl24-akkutest")
         self.mit_fuehler.setChecked(str(self._einst.value("kt/fuehler", "true")).lower() == "true")
-        self.temp_grenze.setValue(int(float(self._einst.value("kt/temp_grenze", 50) or 50)))
+        self.temp_grenze.setValue(int(float(self._einst.value("kt/temp_grenze2", 60) or 60)))
         self.mit_fuehler.toggled.connect(lambda an: self._einst.setValue("kt/fuehler", an))
         # ohne Dauertest sieht man keinen Temperaturanstieg - standardmäßig an, gemerkt
         self.mit_dauer.setChecked(str(self._einst.value("kt/dauer", "true")).lower() == "true")
@@ -482,7 +506,7 @@ class KabelReiter(QWidget):
         self.netzteil.setText(str(self._einst.value("kt/netzteil", "") or ""))
         self.netzteil.textChanged.connect(lambda s: self._einst.setValue("kt/netzteil", s))
         self.referenzen_laden()
-        self.temp_grenze.valueChanged.connect(lambda w: self._einst.setValue("kt/temp_grenze", w))
+        self.temp_grenze.valueChanged.connect(lambda w: self._einst.setValue("kt/temp_grenze2", w))
         hinweis = QLabel("<b>Ablauf:</b> 1. Netzteil <b>ohne</b> das Kabel am DL24 (Adapter mit USB-C-Stecker "
                          "oder kürzestes Kabel) – Referenz. 2. Das Kabel dazwischen stecken – Messung. Die "
                          "Differenz ist das Kabel.<br><br>So prüft auch die USB-Norm: beim <b>Nennstrom</b> des Kabels (5-A-Kabel mit 5 A), "
@@ -865,6 +889,7 @@ class KabelReiter(QWidget):
         d["ref_name"] = self.ref_name.text().strip() if self._ref is not None else ""
         d["bedingungen"] = bedingungen(ab.punkte)
         d["angabe_w"] = self.angabe.currentData() or 0
+        d["temp_grenze"] = self.temp_grenze.value()
         d.update(name=self.name.text().strip(), wann=time.time(), zu_heiss=r.zu_heiss,
                  kurve=[list(p) for p in nt.duennen(ab.punkte, 600)])
         self._zeigen(d)
@@ -946,6 +971,8 @@ class KabelReiter(QWidget):
         d["ref_name"] = self.ref_name.text().strip() if ref else ""
         d["bedingungen"] = bedingungen(ab.punkte)
         d["angabe_w"] = self.angabe.currentData() or 0
+        d["temp_grenze"] = self.temp_grenze.value()
+        d["zu_heiss"] = any(t["ergebnis"].get("zu_heiss") for t in ab.ergebnis.teile)
         d.update(name=self.name.text().strip(), wann=time.time(), je_spannung=je, fehlt=fehlt,
                  pruef_a=self.strom.value(), kurve=[list(p) for p in nt.duennen(ab.punkte, 900)])
         self._zeigen(d)
@@ -1084,8 +1111,8 @@ class KabelReiter(QWidget):
         for i, d in enumerate(self._alle):
             ampel = d.get("ampel")
             bewertung = {"gruen": "✔ in Ordnung", "gelb": "⚠ schwach", "rot": "✘ Schrott"}.get(ampel, "–")
-            if zu_warm(d):
-                bewertung, ampel = "✘ zu warm", "rot"
+            if zu_warm(d) or abgebrochen(d):
+                bewertung, ampel = "✘ zu heiß", "rot"
             erg = angabe_pruefen(d)
             if erg:
                 # mit Angabe zählt, ob es die hält

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.65 – 18.11.2026
+
+- **Kabeltest: eigene Grenze „zu heiß ab“** (Vorgabe 60 °C): Erreicht das
+  Kabel sie, ist das „nicht in Ordnung – zu heiß“ (rot, auch in „Hält die
+  Angabe“ und in der Liste). Die Norm (+30 K) steht getrennt daneben – wurde
+  vorher abgebrochen, als „nicht zu Ende gemessen“ statt „bestanden“.
+
 ## 1.0.64 – 18.11.2026
 
 - **Kabelbericht widerspricht sich nicht mehr:** Ist die Erwärmung über
