@@ -117,9 +117,30 @@ def knapp(d: dict) -> bool:
             and k >= ERWAERMUNG_MAX_K * KNAPP_ANTEIL and not abgebrochen(d))
 
 
+NOTAUS_C = 85.0              # nur hier bricht der Kabeltest ab - darüber droht Schaden
+
+
 def abgebrochen(d: dict) -> bool:
-    """An der eingestellten Fühler-Grenze abgebrochen, bevor die Norm-Grenze erreicht war."""
+    """Vor dem stabilen Ende abgebrochen: am Notaus - oder (ältere Prüfungen) an der eigenen Grenze."""
+    if "notaus" in d:
+        return bool(d["notaus"])
     return bool(d.get("zu_heiss")) and not zu_warm(d)
+
+
+def ueber_eigene(d: dict) -> bool:
+    """Die eigene Grenze „zu heiß ab“ wurde erreicht oder überschritten."""
+    g, m = d.get("temp_grenze"), d.get("temp_max")
+    return g is not None and m is not None and m >= g
+
+
+def ueber_seit(d: dict) -> float | None:
+    """Ab wann (Sekunden ab Start) die eigene Grenze überschritten war."""
+    g = d.get("temp_grenze")
+    k = d.get("kurve") or []
+    if g is None or not k:
+        return None
+    t0 = k[0][0]
+    return next((p[0] - t0 for p in k if len(p) > 3 and p[3] is not None and p[3] >= g), None)
 
 
 def angabe_pruefen(d: dict) -> tuple[str, list[tuple[str, str, str]]] | None:
@@ -141,10 +162,9 @@ def angabe_pruefen(d: dict) -> tuple[str, list[tuple[str, str, str]]] | None:
     if k is None:
         punkte.append(("?", f"Erwärmung bei {zahl(a, 0)} A", "nicht gemessen – ohne Temperaturfühler"))
     elif abgebrochen(d):
-        punkte.append(("✘", f"Eigene Grenze {zahl(d.get('temp_grenze'), 0)} °C",
-                       f"erreicht bei {zahl(strom, 1)} A – das Kabel wurde zu heiß (+{zahl(k, 1)} K bis dahin)"))
         punkte.append(("?", f"Erwärmung bei {zahl(a, 0)} A (Norm +30 K)",
-                       "nicht zu Ende gemessen – vorher an deiner Grenze abgebrochen"))
+                       "nicht zu Ende gemessen – " + (f"Notaus bei {zahl(NOTAUS_C, 0)} °C" if d.get("notaus")
+                                                      else "vorher an deiner Grenze abgebrochen")))
     elif strom < a - 1e-6:
         hoch = k * (a / strom) ** 2 if strom else None
         punkte.append(("?", f"Erwärmung bei {zahl(a, 0)} A",
@@ -168,6 +188,11 @@ def angabe_pruefen(d: dict) -> tuple[str, list[tuple[str, str, str]]] | None:
     if a > 3:
         punkte.append(("?", "E-Marker (für mehr als 3 A nötig)",
                        "kann der DL24 nicht auslesen – ohne E-Marker liefert ein Netzteil höchstens 3 A"))
+    if ueber_eigene(d):
+        seit = ueber_seit(d)
+        punkte.append(("✘", f"Eigene Grenze {zahl(d['temp_grenze'], 0)} °C",
+                       f"überschritten" + (f" nach {_min(seit)}" if seit is not None else "")
+                       + f" – höchstens {zahl(d['temp_max'], 1)} °C am Stecker"))
     if any(p[0] == "✘" for p in punkte):
         gesamt = "nicht"
     elif any(p[0] == "?" and not p[1].startswith("E-Marker") for p in punkte):
@@ -208,10 +233,12 @@ def bericht_html(d: dict) -> str:
          f"Uhr · Typ: {html.escape(d.get('typ_name', ''))}"
          + (f" · Angabe: {d['angabe_w']} W" if d.get("angabe_w") else "") + "</p>"]
     z.append(angabe_html(d))
-    if abgebrochen(d):
+    if ueber_eigene(d):
+        seit = ueber_seit(d)
         z.append(f"<p style='font-size:17px; color:{AMPEL['rot']}'><b>Nicht in Ordnung: zu heiß – deine Grenze von "
-                 f"{zahl(d.get('temp_grenze'), 0)} °C erreicht"
-                 + (f" (nach {_min(d['bedingungen']['dauer_s'])})" if d.get("bedingungen") else "")
+                 f"{zahl(d.get('temp_grenze'), 0)} °C überschritten"
+                 + (f" nach {_min(seit)}" if seit is not None else "")
+                 + f", höchstens {zahl(d['temp_max'], 1)} °C"
                  + (f" – der Widerstand selbst ist in Ordnung ({zahl(d['kabel_mohm'], 0)} mΩ)"
                     if d.get("ampel") == "gruen" else "") + "</b></p>")
     elif knapp(d):
@@ -271,15 +298,24 @@ def bericht_html(d: dict) -> str:
     if d.get("temp_max") is not None:
         t = f"höchstens {zahl(d['temp_max'], 1)} °C"
         if d.get("temp_start") is not None:
-            t += f" (Start {zahl(d['temp_start'], 1)} °C, +{zahl(d['temp_max'] - d['temp_start'], 1)} K)"
+            t += (f" (Raumtemperatur {zahl(d['temp_start'], 1)} °C – {d.get('raum_quelle', 'vom Fühler beim Start')}, "
+                  f"+{zahl(d['temp_max'] - d['temp_start'], 1)} K)")
         tab.append(("Temperatur am Stecker", t))
         k = d.get("erwaermung_k")
+        if ueber_eigene(d):
+            seit = ueber_seit(d)
+            tab.append(("Eigene Grenze", f"<b style='color:{AMPEL['rot']}'>✘ {zahl(d['temp_grenze'], 0)} °C "
+                                         "überschritten</b>" + (f" nach {_min(seit)}" if seit is not None else "")
+                                         + f" – höchstens {zahl(d['temp_max'], 1)} °C am Stecker"))
+        elif d.get("temp_grenze") is not None:
+            tab.append(("Eigene Grenze", f"<b style='color:{AMPEL['gruen']}'>✔ eingehalten</b> – zu heiß ab "
+                                         f"{zahl(d['temp_grenze'], 0)} °C, erreicht wurden höchstens "
+                                         f"{zahl(d['temp_max'], 1)} °C"))
         if k is not None and abgebrochen(d):
             soll = (d["temp_start"] + ERWAERMUNG_MAX_K) if d.get("temp_start") is not None else None
-            tab.append(("Eigene Grenze", f"<b style='color:{AMPEL['rot']}'>✘ {zahl(d.get('temp_grenze'), 0)} °C erreicht"
-                                         f"</b> – zu heiß nach deiner Vorgabe (+{zahl(k, 1)} K über dem Start)"))
-            tab.append(("Erwärmung (Norm)", f"<b style='color:{AMPEL['gelb']}'>? nicht zu Ende gemessen</b> – vorher an "
-                                            "deiner Grenze abgebrochen."
+            tab.append(("Erwärmung (Norm)", f"<b style='color:{AMPEL['gelb']}'>? nicht zu Ende gemessen</b> – "
+                                            + (f"Notaus bei {zahl(NOTAUS_C, 0)} °C." if d.get("notaus") else
+                                               "vorher an deiner Grenze abgebrochen.")
                                             + (f" Nach Norm wäre erst über {zahl(soll, 0)} °C (Start + 30 K) zu "
                                                "warm." if soll else "")))
         elif k is not None and knapp(d):
@@ -439,6 +475,21 @@ class KabelReiter(QWidget):
         self.strom.setSuffix(" A")
         self.strom.setToolTip("Bis zu diesem Strom wird gemessen. Das Netzteil muss ihn liefern können.")
         f.addRow("Prüfstrom bis:", self.strom)
+        self.leistung = QDoubleSpinBox()
+        self.leistung.setRange(0, 150)
+        self.leistung.setDecimals(0)
+        self.leistung.setSingleStep(5)
+        self.leistung.setSuffix(" W")
+        self.leistung.setSpecialValueText("nicht verwendet – Strom gilt")
+        self.leistung.setToolTip("Statt des Stroms eine Leistung vorgeben: je Spannung wird der Strom daraus "
+                                 "gerechnet (Leistung ÷ Spannung). Nie über dem Nennstrom des Kabeltyps und nie "
+                                 "über 150 W.")
+        self.leistung.valueChanged.connect(self._leistung_zeigen)
+        f.addRow("oder Leistung:", self.leistung)
+        self.leistung_hinweis = QLabel()
+        self.leistung_hinweis.setWordWrap(True)
+        self.leistung_hinweis.setStyleSheet(gedaempft())
+        f.addRow(self.leistung_hinweis)
         self.mit_ref = QCheckBox("Referenz ohne Kabel messen (empfohlen)")
         self.mit_ref.setChecked(True)
         self.mit_ref.setToolTip("Zuerst das Netzteil über einen kurzen Adapter direkt am DL24 - dann wird sein "
@@ -484,9 +535,12 @@ class KabelReiter(QWidget):
                 haken.setToolTip("28 V nur mit EPR: Netzteil, Trigger-Adapter und ein 5-A-/240-W-Kabel")
             zeile.addWidget(haken)
             self.spannungen.append((v, haken))
+            haken.toggled.connect(self._leistung_zeigen)
         zeile.addStretch(1)
         f.addRow(zeile)
         self.alle_v.toggled.connect(lambda an: [hk.setEnabled(an) for _, hk in self.spannungen])
+        self.alle_v.toggled.connect(self._leistung_zeigen)
+        self.typ.currentIndexChanged.connect(self._leistung_zeigen)
         for _, hk in self.spannungen:
             hk.setEnabled(False)
         self.mit_dauer = QCheckBox("Dauertest bis stabil, mindestens Minuten:")
@@ -507,6 +561,9 @@ class KabelReiter(QWidget):
                                    "Aus = nur einmal bei der niedrigsten - die Wärme im Kabel hängt nur vom Strom ab.")
         f.addRow(self.dauer_jede)
         self.mit_fuehler = QCheckBox("Temperaturfühler am Stecker, zu heiß ab:")
+        self.mit_fuehler.setToolTip("Ab dieser Temperatur gilt das Kabel als zu heiß – der Test läuft trotzdem "
+                                    f"weiter bis stabil und schreibt alles in den Bericht. Abgebrochen wird nur "
+                                    f"beim Notaus ab {NOTAUS_C:.0f} °C.")
         self.temp_grenze = QSpinBox()
         self.temp_grenze.setRange(30, 90)
         self.temp_grenze.setValue(50)
@@ -515,6 +572,14 @@ class KabelReiter(QWidget):
         zeile.addWidget(self.mit_fuehler)
         zeile.addWidget(self.temp_grenze)
         f.addRow(zeile)
+        self.raum = QDoubleSpinBox()
+        self.raum.setRange(0, 45)
+        self.raum.setDecimals(1)
+        self.raum.setSuffix(" °C")
+        self.raum.setSpecialValueText("vom Fühler beim Start")
+        self.raum.setToolTip("Bezug für die +30 K der Norm. Leer: der erste Wert des Fühlers – stimmt nur, wenn der "
+                             "Stecker Raumtemperatur hat. Genauer: mit einem Raumthermometer messen und eintragen.")
+        f.addRow("Raumtemperatur:", self.raum)
         # Wärme am Stecker ist beim Kabel das Wichtigste - Fühler standardmäßig an, Einstellung gemerkt
         from PySide6.QtCore import QSettings
         self._einst = QSettings("dl24-akkutest", "dl24-akkutest")
@@ -574,7 +639,8 @@ class KabelReiter(QWidget):
         rechts = QVBoxLayout()
         raster = QHBoxLayout()
         self.anz = {}
-        for k, t in (("u", "Spannung"), ("i", "Strom"), ("t", "Temperatur (Fühler)"), ("r", "Widerstand Kabel")):
+        for k, t in (("u", "Spannung"), ("i", "Strom"), ("p", "Leistung"), ("v", "im Kabel verloren"),
+                     ("t", "Temperatur (Fühler)"), ("r", "Widerstand Kabel")):
             self.anz[k] = Anzeige(t)
             raster.addWidget(self.anz[k])
         rechts.addLayout(raster)
@@ -599,6 +665,16 @@ class KabelReiter(QWidget):
             self.f._ohne_vorsatz(b.getPlotItem())
             b.getAxis("left").setWidth(56)
         self.linie_t = self.bild_t.plot([], [], pen=pg.mkPen("#d03b3b", width=2))
+        for b in (self.bild, self.bild_t):
+            b.showGrid(x=True, y=True, alpha=0.3)
+        # Normgrenze (Start + 30 K) und die eigene Grenze "zu heiß ab"
+        self.norm_linie = pg.InfiniteLine(angle=0, pen=pg.mkPen("#d03b3b", width=1.5),
+                                          label="Norm +30 K", labelOpts={"color": "#d03b3b", "position": 0.97})
+        self.eigen_linie = pg.InfiniteLine(angle=0, pen=pg.mkPen("#e08a00", width=1.5, style=Qt.DashLine),
+                                           label="zu heiß ab", labelOpts={"color": "#e08a00", "position": 0.85})
+        for linie in (self.norm_linie, self.eigen_linie):
+            linie.hide()
+            self.bild_t.addItem(linie)
         rechts.addWidget(self.bild, 3)
         rechts.addWidget(self.bild_t, 1)
         self.ergebnis = QLabel()
@@ -615,8 +691,12 @@ class KabelReiter(QWidget):
         self.knopf_pdf = QPushButton("Bericht speichern (PDF) …")
         self.knopf_pdf.clicked.connect(lambda: self.bericht_speichern())
         self.knopf_pdf.setEnabled(False)
+        self.knopf_bericht = QPushButton("Bericht anzeigen")
+        self.knopf_bericht.clicked.connect(lambda: self.bericht_fenster())
+        self.knopf_bericht.setEnabled(False)
         zeile.addWidget(self.knopf_uebernehmen)
         zeile.addStretch(1)
+        zeile.addWidget(self.knopf_bericht)
         zeile.addWidget(self.knopf_pdf)
         rechts.addLayout(zeile)
         kopf = QHBoxLayout()
@@ -635,6 +715,7 @@ class KabelReiter(QWidget):
         self.tabelle.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.tabelle.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.tabelle.itemSelectionChanged.connect(self._alten_zeigen)
+        self.tabelle.itemDoubleClicked.connect(lambda _: self.bericht_fenster())
         self.tabelle.setMaximumHeight(170)
         rechts.addWidget(self.tabelle)
         h.addLayout(rechts, 1)
@@ -683,33 +764,61 @@ class KabelReiter(QWidget):
         frei = not self.laeuft
         self.knopf_start.setEnabled(self._steuer_ok and frei)
         self.knopf_abbruch.setEnabled(not frei)
-        for w in (self.name, self.angabe, self.typ, self.strom, self.mit_ref, self.netzteil_wahl, self.mit_dauer, self.dauer_min,
-                  self.mit_fuehler, self.temp_grenze, self.alle_v, self.dauer_jede):
+        for w in (self.name, self.angabe, self.typ, self.leistung, self.mit_ref, self.netzteil_wahl, self.mit_dauer, self.dauer_min,
+                  self.mit_fuehler, self.temp_grenze, self.alle_v, self.dauer_jede, self.raum):
             w.setEnabled(frei)
         for _, hk in self.spannungen:
             hk.setEnabled(frei and self.alle_v.isChecked())
+        self.strom.setEnabled(frei and not self.leistung.value())
 
     def _einstellung(self, ref: bool) -> nt.NetzteilEinstellung:
-        a = round(self.strom.value(), 2)
+        a = self.strom_fuer(5.0)[0] if self.leistung.value() else round(self.strom.value(), 2)
         if ref:
             # Temperatur auch hier aufzeichnen - sonst fehlt der Streifen während der Referenz
             return nt.NetzteilEinstellung("Referenz ohne Kabel", 5.0, a, stufen=4, stufe_s=10, dauertest=False,
                                           abschalttest=False, fuehler=self.mit_fuehler.isChecked(),
-                                          temp_grenze=self.temp_grenze.value())
+                                          temp_grenze=NOTAUS_C)
         return nt.NetzteilEinstellung(self.name.text().strip() or "Kabel", 5.0, a, stufen=5, stufe_s=15,
                                       dauertest=self.mit_dauer.isChecked(), dauer_proz=100, bis_stabil=True,
                                       dauer_min=self.dauer_min.value(), abschalttest=False,
-                                      fuehler=self.mit_fuehler.isChecked(), temp_grenze=self.temp_grenze.value())
+                                      fuehler=self.mit_fuehler.isChecked(), temp_grenze=NOTAUS_C)
+
+    def strom_fuer(self, volt: float) -> tuple[float, bool]:
+        """Prüfstrom bei dieser Spannung - aus der Leistung, wenn eine vorgegeben ist.
+        (Strom, gedeckelt?) - nie über dem Nennstrom des Kabeltyps und den 150 W des DL24."""
+        nenn = nt.KABEL_TYPEN[self.typ.currentData()][2]
+        dl24 = nt.DL24_MAX_W / volt * 0.98
+        w = self.leistung.value()
+        if not w:
+            a = min(self.strom.value(), dl24)
+            return round(a, 2), a < self.strom.value() - 1e-6
+        a = w / volt
+        return round(min(a, nenn, dl24), 2), a > min(nenn, dl24) + 1e-6
+
+    def _leistung_zeigen(self, *_) -> None:
+        w = self.leistung.value()
+        self.strom.setEnabled(not w and not self.laeuft)
+        if not w:
+            self.leistung_hinweis.setText("")
+            return
+        volt = self._volt() or [5.0]
+        teile = []
+        for v in volt:
+            a, gedeckelt = self.strom_fuer(v)
+            teile.append(f"{v:g} V: {a:.2f} A ({a * v:.0f} W)".replace(".", ",") + (" ⚠ gedeckelt" if gedeckelt else ""))
+        self.leistung_hinweis.setText(" · ".join(teile) + ("  –  gedeckelt heißt: mehr Strom verträgt der Kabeltyp "
+                                                           "nicht" if any("gedeckelt" in x for x in teile) else ""))
 
     def _volt(self) -> list[float]:
         return [v for v, h in self.spannungen if h.isChecked()] if self.alle_v.isChecked() else []
 
     def _lauf(self, e: nt.NetzteilEinstellung) -> None:
+        self._start_geprueft = False
         melden = lambda a, t: self.f.b.ereignis.emit(self.kennung + ":" + a, t)
         volt = self._volt()
         if volt:
             # jede Spannung bis zum Prüfstrom - höchstens so viel, wie der DL24 an Leistung schafft
-            stufen = [(v, round(min(e.nenn_a, nt.DL24_MAX_W / v * 0.98), 2)) for v in volt]
+            stufen = [(v, self.strom_fuer(v)[0]) for v in volt]
             self.ablauf = nt.TriggerAblauf(e, stufen, self.f.geraet, bei_ereignis=melden)
             if e.dauertest and not self.dauer_jede.isChecked():
                 # Dauertest nur einmal, bei der niedrigsten Spannung: die Wärme im Kabel hängt nur vom
@@ -814,6 +923,8 @@ class KabelReiter(QWidget):
     def messwert(self, m: Messwert) -> None:
         self.anz["u"].setzen(zahl(m.spannung, 3, "V"))
         self.anz["i"].setzen(zahl(m.strom, 3, "A"))
+        self.anz["p"].setzen(zahl(m.spannung * m.strom, 2, "W"))
+        self._strom_jetzt = m.strom
         if not self.mit_fuehler.isChecked():
             self.anz["t"].setzen("aus ⚠" if m.temp_fuehler is not None else "aus")
             self.anz["t"].setToolTip("Der Fühler steckt, wird aber nicht ausgewertet – Haken „Temperaturfühler am "
@@ -833,12 +944,18 @@ class KabelReiter(QWidget):
                     ref = ref.get(teil.einstellung.nenn_v, 0)
                 kabel = w - (ref or 0) if self.phase == "kabel" else w
                 self.anz["r"].setzen(f"{max(0, kabel):.0f} mΩ" + (" (Netzteil)" if self.phase == "ref" else ""))
+                if self.phase == "kabel":
+                    # Wärme, die das Kabel gerade erzeugt: I² · R
+                    self.anz["v"].setzen(zahl(m.strom ** 2 * max(0, kabel) / 1000, 2, "W"))
         self._zeit_zeigen(ab, teil, m)
         p = list(ab.punkte)
         self.linie.setData([x[0] / 60 for x in p], [x[1] for x in p])
         mit = [(x[0] / 60, x[3]) for x in p if x[3] is not None]
         self.linie_t.setData([a for a, _ in mit], [b for _, b in mit])
         self.bild_t.setVisible(bool(mit))
+        if mit:
+            self._start_pruefen(mit[0][1])
+        self._grenzlinien(self._raum(mit[0][1]) if mit else None)
 
     def _zeit_zeigen(self, ab, teil, m: Messwert) -> None:
         """Wie lange läuft die Prüfung schon, was kommt noch, wie lange noch etwa."""
@@ -870,6 +987,42 @@ class KabelReiter(QWidget):
         if rest is not None:
             teile.append(f"noch etwa {dauer_text(rest)} gesamt")
         self.zeit.setText(" · ".join(teile))
+
+    def _raum(self, fuehler_start: float | None) -> float | None:
+        """Bezug für die +30 K: eingetragen - sonst der erste Wert des Fühlers."""
+        return self.raum.value() if self.raum.value() > 0 else fuehler_start
+
+    def _raum_quelle(self) -> str:
+        return "eingetragen" if self.raum.value() > 0 else "vom Fühler beim Start"
+
+    def _start_pruefen(self, erster: float) -> None:
+        """Ist der Stecker beim Start noch warm? Dann stimmt der Bezug für die +30 K nicht."""
+        if getattr(self, "_start_geprueft", False):
+            return
+        self._start_geprueft = True
+        raum = self.raum.value()
+        if (raum > 0 and erster > raum + 3) or (raum <= 0 and erster > 30):
+            self.f.b.ereignis.emit("warnung", f"Der Fühler zeigt beim Start schon {erster:.1f} °C"
+                                   + (f" – {erster - raum:.1f} °C über der eingetragenen Raumtemperatur"
+                                      if raum > 0 else "") + ". Ist der Stecker vom letzten Test noch warm oder "
+                                   "wurde der Fühler angefasst? Dann abkühlen lassen und neu starten.")
+
+    def _grenzlinien(self, start: float | None, eigen: float | None = None) -> None:
+        """Rote Linie: Normgrenze (Start + 30 K). Gestrichelt: die eigene Grenze „zu heiß ab“."""
+        if start is None:
+            self.norm_linie.hide()
+            self.eigen_linie.hide()
+            return
+        self.norm_linie.setValue(start + ERWAERMUNG_MAX_K)
+        self.norm_linie.label.setFormat(f"Norm +30 K ({start + ERWAERMUNG_MAX_K:.0f} °C)")
+        self.norm_linie.show()
+        eigen = eigen if eigen is not None else self.temp_grenze.value()
+        self.eigen_linie.setValue(eigen)
+        self.eigen_linie.label.setFormat(f"zu heiß ab {eigen:.0f} °C")
+        self.eigen_linie.show()
+        # beide Linien sollen sichtbar sein, auch wenn die Kurve noch weit darunter liegt
+        oben = max(start + ERWAERMUNG_MAX_K, eigen) + 3
+        self.bild_t.setYRange(min(start - 2, start), oben, padding=0)
 
     def ereignis(self, art: str, text: str) -> None:
         if art == "umschalten":
@@ -909,18 +1062,21 @@ class KabelReiter(QWidget):
             self.schritt.setText("Kein Widerstand ermittelt – zu wenige Stufen geschafft.")
             self.f._zustand_zeigen()
             return
-        d = auswerten(self._ref, r.widerstand_mohm, self.typ.currentData(), r.temp_start, r.temp_max)
+        d = auswerten(self._ref, r.widerstand_mohm, self.typ.currentData(), self._raum(r.temp_start), r.temp_max)
+        d["raum_quelle"] = self._raum_quelle()
         d["pruef_a"] = self.strom.value()
         d["stabil"] = r.temp_stabil
         d["ref_name"] = self.ref_name.text().strip() if self._ref is not None else ""
         d["bedingungen"] = bedingungen(ab.punkte)
         d["angabe_w"] = self.angabe.currentData() or 0
         d["temp_grenze"] = self.temp_grenze.value()
+        d["notaus"] = r.zu_heiss
         d.update(name=self.name.text().strip(), wann=time.time(), zu_heiss=r.zu_heiss,
                  kurve=[list(p) for p in nt.duennen(ab.punkte, 600)])
         self._zeigen(d)
         self._speichern(d)
         self.schritt.setText(f"Fertig: Kabel {d['kabel_mohm']:.0f} mΩ")
+        self.bericht_fenster(d)
         self.zeit.setText(f"Prüfdauer {_min(d['bedingungen']['dauer_s'])}" if d.get("bedingungen") else "")
         self.f._zustand_zeigen()
 
@@ -988,8 +1144,9 @@ class KabelReiter(QWidget):
         kabel = sum(x[3] for x in je) / len(je)
         temps = [t["ergebnis"].get("temp_max") for t in ab.ergebnis.teile if t["ergebnis"].get("temp_max")]
         starts = [t["ergebnis"].get("temp_start") for t in ab.ergebnis.teile if t["ergebnis"].get("temp_start")]
-        d = auswerten(None if not ref else 0.0, kabel, self.typ.currentData(), min(starts) if starts else None,
-                      max(temps) if temps else None)
+        d = auswerten(None if not ref else 0.0, kabel, self.typ.currentData(),
+                      self._raum(min(starts) if starts else None), max(temps) if temps else None)
+        d["raum_quelle"] = self._raum_quelle()
         d["ohne_referenz"] = not ref
         d["gesamt_mohm"] = sum(x[2] for x in je) / len(je)
         d["ref_mohm"] = d["gesamt_mohm"] - kabel
@@ -999,26 +1156,36 @@ class KabelReiter(QWidget):
         d["angabe_w"] = self.angabe.currentData() or 0
         d["temp_grenze"] = self.temp_grenze.value()
         d["zu_heiss"] = any(t["ergebnis"].get("zu_heiss") for t in ab.ergebnis.teile)
+        d["notaus"] = d["zu_heiss"]
         d.update(name=self.name.text().strip(), wann=time.time(), je_spannung=je, fehlt=fehlt,
                  pruef_a=self.strom.value(), kurve=[list(p) for p in nt.duennen(ab.punkte, 900)])
         self._zeigen(d)
         self._speichern(d)
         self.schritt.setText(f"Fertig: Kabel {d['kabel_mohm']:.0f} mΩ (Mittel über {len(je)} Spannungen)")
+        self.bericht_fenster(d)
         self.zeit.setText(f"Prüfdauer {_min(d['bedingungen']['dauer_s'])}" if d.get("bedingungen") else "")
         self.f._zustand_zeigen()
 
     # ------------------------------------------------------------------
     def _zeigen(self, d: dict) -> None:
         self._letztes = d
-        self.ergebnis.setText(bericht_html(d))
+        # im Reiter nur die Kurzfassung - der ganze Bericht im eigenen Fenster
+        kurz = bericht_html(d).split("<table cellspacing=4>")[0]
+        self.ergebnis.setText(kurz + f"<p>Widerstand <b>{zahl(d['kabel_mohm'], 0)} mΩ</b>"
+                              + (f" · Stecker höchstens <b>{zahl(d['temp_max'], 1)} °C</b>" if d.get("temp_max")
+                                 is not None else "")
+                              + " · <i>ganzer Bericht: „Bericht anzeigen“ oder Doppelklick in der Liste</i></p>")
         self.ergebnis.show()
         self.knopf_uebernehmen.setEnabled(True)
         self.knopf_pdf.setEnabled(True)
+        self.knopf_bericht.setEnabled(True)
         k = d.get("kurve") or []
         self.linie.setData([x[0] / 60 for x in k], [x[1] for x in k])
         mit = [(x[0] / 60, x[3]) for x in k if len(x) > 3 and x[3] is not None]
         self.linie_t.setData([a for a, _ in mit], [b for _, b in mit])
         self.bild_t.setVisible(bool(mit))
+        self._grenzlinien(d.get("temp_start") if d.get("temp_start") is not None else (mit[0][1] if mit else None),
+                          d.get("temp_grenze"))
 
     def uebernehmen(self) -> None:
         d = self._letztes
@@ -1137,7 +1304,7 @@ class KabelReiter(QWidget):
         for i, d in enumerate(self._alle):
             ampel = d.get("ampel")
             bewertung = {"gruen": "✔ in Ordnung", "gelb": "⚠ schwach", "rot": "✘ Schrott"}.get(ampel, "–")
-            if zu_warm(d) or abgebrochen(d):
+            if zu_warm(d) or ueber_eigene(d) or (abgebrochen(d) and "notaus" not in d):
                 bewertung, ampel = "✘ zu heiß", "rot"
             elif knapp(d) and ampel != "rot":
                 bewertung, ampel = "? knapp (Wärme)", "gelb"
@@ -1174,19 +1341,10 @@ class KabelReiter(QWidget):
         self.ergebnis.hide()
         self.liste_laden()
 
-    def bericht_speichern(self, pfad: str | None = None) -> str | None:
-        from PySide6.QtCore import QMarginsF, QUrl
-        from PySide6.QtGui import QPageLayout, QPageSize, QPdfWriter, QTextDocument
-        from PySide6.QtWidgets import QFileDialog
-        d = self._letztes
-        if not d:
-            return None
-        if not pfad:
-            name = "".join(c if c.isalnum() or c in " -_" else "_" for c in d.get("name") or "Kabel").strip()
-            pfad, _ = QFileDialog.getSaveFileName(self, "Bericht speichern",
-                                                  f"Kabelbericht {name} {datetime.now():%Y-%m-%d}.pdf", "PDF (*.pdf)")
-            if not pfad:
-                return None
+    def _dokument(self, d: dict):
+        """Der ganze Bericht - fürs Fenster und fürs PDF derselbe."""
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QTextDocument
         from . import normen
         from .netzteil_reiter import normen_html
         doc = QTextDocument()
@@ -1199,8 +1357,48 @@ class KabelReiter(QWidget):
                 log.exception("QR-Code")
         doc.setHtml(bericht_html(d) + "<p><b>Verlauf</b></p><p><img src='kurve.png' width='640'></p>"
                     "<p style='color:gray'>Oben die Spannung am DL24, in der Mitte der Strom, unten die Temperatur "
-                    "am Stecker mit der Grenze der Norm (+30 K über der Starttemperatur).</p>"
+                    "am Stecker mit der Grenze der Norm (+30 K über der Raumtemperatur).</p>"
                     + normen_html(quellen))
+        return doc
+
+    def bericht_fenster(self, d: dict | None = None) -> None:
+        """Den ganzen Bericht in einem eigenen Fenster - mit Diagramm, Normen und PDF-Knopf."""
+        from PySide6.QtWidgets import QDialog, QDialogButtonBox, QTextBrowser
+        d = d or self._letztes
+        if not d:
+            return
+        dlg = QDialog(self)
+        dlg.setWindowFlag(Qt.Window)
+        dlg.setWindowTitle(f"Kabelbericht: {d.get('name') or 'ohne Namen'}")
+        dlg.resize(900, 1000)
+        lay = QVBoxLayout(dlg)
+        anzeige = QTextBrowser()
+        anzeige.setDocument(self._dokument(d))
+        anzeige.document().setParent(anzeige)
+        lay.addWidget(anzeige)
+        knoepfe = QDialogButtonBox(QDialogButtonBox.Close)
+        pdf = knoepfe.addButton("Bericht speichern (PDF) …", QDialogButtonBox.ActionRole)
+        pdf.clicked.connect(lambda: self.bericht_speichern(None, d))
+        knoepfe.rejected.connect(dlg.close)
+        lay.addWidget(knoepfe)
+        dlg.setAttribute(Qt.WA_DeleteOnClose)
+        self._fenster = dlg
+        dlg.show()
+
+    def bericht_speichern(self, pfad: str | None = None, d: dict | None = None) -> str | None:
+        from PySide6.QtCore import QMarginsF
+        from PySide6.QtGui import QPageLayout, QPageSize, QPdfWriter
+        from PySide6.QtWidgets import QFileDialog
+        d = d or self._letztes
+        if not d:
+            return None
+        if not pfad:
+            name = "".join(c if c.isalnum() or c in " -_" else "_" for c in d.get("name") or "Kabel").strip()
+            pfad, _ = QFileDialog.getSaveFileName(self, "Bericht speichern",
+                                                  f"Kabelbericht {name} {datetime.now():%Y-%m-%d}.pdf", "PDF (*.pdf)")
+            if not pfad:
+                return None
+        doc = self._dokument(d)
         w = QPdfWriter(pfad)
         w.setPageSize(QPageSize(QPageSize.A4))
         w.setPageMargins(QMarginsF(15, 15, 15, 15), QPageLayout.Millimeter)

@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.0.67 – 18.11.2026
+
+**Kabeltest**
+- **Eigene Grenze bricht nicht mehr ab:** „Zu heiß ab“ wird nur festgehalten
+  – der Test läuft bis zur stabilen Temperatur weiter. Im Bericht steht, wann
+  die Grenze überschritten wurde und wie heiß es wurde; die Norm (+30 K) wird
+  zu Ende gemessen. Abgebrochen wird nur noch beim Notaus ab 85 °C.
+- **Raumtemperatur:** neues Feld als Bezug für die +30 K (sonst wie bisher der
+  erste Wert des Fühlers). Warnung, wenn der Stecker beim Start schon warm ist.
+  Der Bericht nennt, woher die Raumtemperatur stammt.
+- **Bericht im eigenen Fenster:** öffnet sich nach dem Test, per Doppelklick
+  in der Liste oder „Bericht anzeigen“ – vollständig mit Diagramm, Normen und
+  PDF. Im Reiter steht nur die Kurzfassung.
+- **Leistung vorgeben:** „oder Leistung“ (W) statt Prüfstrom – der Strom wird
+  je Spannung gerechnet, nie über dem Nennstrom des Kabeltyps (sonst
+  „gedeckelt“).
+- **Anzeige oben:** Leistung und „im Kabel verloren“ (W).
+- **Temperaturdiagramm:** Raster, rote Linie bei der Normgrenze
+  (Raum + 30 K), gestrichelt die eigene Grenze.
+
 ## 1.0.66 – 18.11.2026
 
 - **Dauertest „bis stabil“ endet nicht mehr mitten im Anstieg:** Steigt die

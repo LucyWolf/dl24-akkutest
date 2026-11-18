@@ -538,8 +538,19 @@ def test_kabeltester():
     ab_h = dict(kr.auswerten(0, 202, "usbc3", 27.7, 40.0), pruef_a=3.0, stabil=False, wann=0, angabe_w=60,
                 zu_heiss=True, temp_grenze=40, je_spannung=[(20.0, 0, 202, 202, 3.0)])
     h = kr.bericht_html(ab_h)
-    assert "nicht zu Ende gemessen" in h and "deine Grenze von 40 °C erreicht" in h, h
+    assert "nicht zu Ende gemessen" in h and "deine Grenze von 40 °C überschritten" in h, h
     assert kr.angabe_pruefen(ab_h)[0] == "nicht" and "über 58 °C" in h and "Eigene Grenze 40 °C" in h, h
+    # neu: die eigene Grenze bricht nicht ab - Norm wird zu Ende gemessen, beides steht im Bericht
+    weiter = dict(kr.auswerten(0, 90, "usbc3", 25.0, 47.0), pruef_a=3.0, stabil=True, wann=0, angabe_w=60,
+                  zu_heiss=False, notaus=False, temp_grenze=45,
+                  kurve=[[0, 20, 3, 25.0], [120, 20, 3, 40.0], [252, 20, 3, 45.5], [600, 20, 3, 47.0]],
+                  je_spannung=[(20.0, 0, 90, 90, 3.0)])
+    h = kr.bericht_html(weiter)
+    assert "Grenze von 45 °C überschritten nach 4:12 min" in h and "✔ bestanden" in h, h
+    g, punkte = kr.angabe_pruefen(weiter)
+    assert g == "nicht" and any(p[1] == "Eigene Grenze 45 °C" for p in punkte)
+    assert any("Erwärmung" in p[1] and p[0] == "✔" for p in punkte), punkte
+    assert not kr.abgebrochen(weiter)
     offen = dict(gut, pruef_a=3.0, je_spannung=[(20.0, 0, 120, 120, 3.0)])
     g, punkte = kr.angabe_pruefen(offen)
     h = kr.bericht_html(offen)
@@ -575,6 +586,15 @@ def test_kabeltester():
     assert [v for v, h in kt.spannungen if h.isChecked()] == [5.0, 9.0, 12.0, 15.0, 20.0, 28.0]
     kt.angabe.setCurrentIndex(0)
     kt.typ.setCurrentIndex(kt.typ.findData("usbc3"))
+    # Leistung statt Strom: je Spannung gerechnet, nie über dem Nennstrom des Typs
+    kt.alle_v.setChecked(True)
+    for v, h in kt.spannungen:
+        h.setChecked(v in (5.0, 20.0))
+    kt.leistung.setValue(60)
+    assert kt.strom_fuer(20.0) == (3.0, False) and kt.strom_fuer(5.0) == (3.0, True)
+    assert "gedeckelt" in kt.leistung_hinweis.text() and not kt.strom.isEnabled()
+    kt.leistung.setValue(0)
+    kt.alle_v.setChecked(False)
     kt.name.setText("Testkabel")
     kt.ref_name.setText("Kurz 15 cm")
     kt.strom.setValue(2.0)
@@ -582,6 +602,7 @@ def test_kabeltester():
     kt.starten()
     assert kt.laeuft and not f.nt.knopf_start.isEnabled()
     assert warten(lambda: kt.bild_t.isVisible(), 30)              # Temperatur schon während der Referenz
+    assert kt.norm_linie.isVisible() and kt.eigen_linie.isVisible() and kt.eigen_linie.value() == 60
     assert warten(lambda: "Läuft seit" in kt.zeit.text() and "noch etwa" in kt.zeit.text(), 10), kt.zeit.text()
     assert warten(lambda: kt.knopf_weiter.isVisible(), 60), kt.schritt.text()
     assert 100 <= kt._ref <= 140 and "„Kurz 15 cm“ HERAUSZIEHEN" in kt.schritt.text(), kt.schritt.text()
@@ -590,11 +611,13 @@ def test_kabeltester():
     f.geraet.v.geraet.akku.innen += 0.100          # jetzt steckt ein Kabel mit 100 mΩ dazwischen
     kt.knopf_weiter.click()
     assert warten(lambda: not kt.laeuft and kt.ergebnis.isVisible(), 90), kt.schritt.text()
+    assert kt.anz["p"].wert.text().endswith("W") and kt.anz["v"].wert.text().endswith("W"), \
+        (kt.anz["p"].wert.text(), kt.anz["v"].wert.text())
     d = kt._letztes
     print("Kabel:", d["kabel_mohm"], d["ref_mohm"], d["gesamt_mohm"], d["ampel"])
     assert 80 <= d["kabel_mohm"] <= 120 and d["ampel"] == "gruen" and d["nenn_a"] == 3.0, d
-    assert "Taugt bis" in kt.ergebnis.text() and "3 A – mehr ist" in kt.ergebnis.text()
-    assert "Referenzkabel „Kurz 15 cm“" in kt.ergebnis.text()
+    voll = kr.bericht_html(d)
+    assert "Taugt bis" in voll and "3 A – mehr ist" in voll and "Referenzkabel „Kurz 15 cm“" in voll
     # Angabe nachträglich ändern: neu bewertet und gespeichert, ohne neue Messung
     kt.angabe.setCurrentIndex(kt.angabe.findData(100))
     assert kt._letztes["angabe_w"] == 100 and kt._letztes["typ"] == "usbc5"
@@ -611,8 +634,13 @@ def test_kabeltester():
     kt.abbrechen()
     assert warten(lambda: not kt.laeuft, 10)
     kt.ref_wahl.setCurrentIndex(0)
-    assert "Geprüft mit" in kt.ergebnis.text() and "W</b> (2,00 A" in kt.ergebnis.text(), kt.ergebnis.text()
+    assert "Geprüft mit" in voll and "W</b> (2,00 A" in voll, voll
     assert kt.tabelle.rowCount() == 1 and "Testkabel" in kt.tabelle.item(0, 1).text()
+    # der ganze Bericht öffnet sich im eigenen Fenster
+    from PySide6.QtWidgets import QTextBrowser
+    assert kt._fenster.isVisible() and "Grundlage der Grenzwerte" in kt._fenster.findChild(QTextBrowser).toPlainText()
+    kt._fenster.close()
+    assert "Bericht anzeigen" in kt.ergebnis.text() and kt.knopf_bericht.isEnabled()
     foto(f, "16-kabeltester")
     kt.uebernehmen()
     assert f.nt.kabel.value() == d["kabel_mohm"] and f.pb.kabel.value() == d["kabel_mohm"]
@@ -686,9 +714,9 @@ def test_kabeltester():
     d = kt._letztes
     print("Kabel je Spannung:", d["je_spannung"], d["kabel_mohm"])
     assert [x[0] for x in d["je_spannung"]] == [5.0, 9.0] and 60 <= d["kabel_mohm"] <= 100, d
-    assert all(x[5] is not None for x in d["je_spannung"]) and "Stecker max." in kt.ergebnis.text()
-    assert all(x[6] and x[7] for x in d["je_spannung"]) and "Leistung" in kt.ergebnis.text()
-    assert "Je Spannung" in kt.ergebnis.text() and "9 V" in kt.ergebnis.text()
+    assert all(x[5] is not None for x in d["je_spannung"]) and "Stecker max." in kr.bericht_html(d)
+    assert all(x[6] and x[7] for x in d["je_spannung"]) and "Leistung" in kr.bericht_html(d)
+    assert "Je Spannung" in kr.bericht_html(d) and "9 V" in kr.bericht_html(d)
     quelle.innen -= 0.080
     f.nt.kabel.setValue(0)
     f.pb.kabel.setValue(0)
