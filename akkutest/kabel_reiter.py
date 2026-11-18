@@ -107,6 +107,16 @@ def zu_warm(d: dict) -> bool:
     return k is not None and k > ERWAERMUNG_MAX_K
 
 
+KNAPP_ANTEIL = 0.8           # nicht stabil und schon über 80 % der Grenze: kein „bestanden“
+
+
+def knapp(d: dict) -> bool:
+    """Temperatur stieg noch und lag schon nahe an der Grenze - bestanden wäre zu optimistisch."""
+    k = d.get("erwaermung_k")
+    return (k is not None and not zu_warm(d) and not d.get("stabil", True)
+            and k >= ERWAERMUNG_MAX_K * KNAPP_ANTEIL and not abgebrochen(d))
+
+
 def abgebrochen(d: dict) -> bool:
     """An der eingestellten Fühler-Grenze abgebrochen, bevor die Norm-Grenze erreicht war."""
     return bool(d.get("zu_heiss")) and not zu_warm(d)
@@ -142,6 +152,9 @@ def angabe_pruefen(d: dict) -> tuple[str, list[tuple[str, str, str]]] | None:
                        f"hochgerechnet etwa +{zahl(hoch, 0)} K" + (" – das wäre über +30 K" if hoch and hoch > 30
                                                                   else "") +
                        f". Für den Nachweis mit {zahl(a, 0)} A prüfen."))
+    elif knapp(d):
+        punkte.append(("?", f"Erwärmung bei {zahl(a, 0)} A",
+                       f"+{zahl(k, 1)} K und noch steigend – knapp unter +30 K, wird sie wahrscheinlich überschreiten"))
     else:
         ok = k <= ERWAERMUNG_MAX_K
         punkte.append(("✔" if ok else "✘", f"Erwärmung bei {zahl(a, 0)} A",
@@ -201,6 +214,11 @@ def bericht_html(d: dict) -> str:
                  + (f" (nach {_min(d['bedingungen']['dauer_s'])})" if d.get("bedingungen") else "")
                  + (f" – der Widerstand selbst ist in Ordnung ({zahl(d['kabel_mohm'], 0)} mΩ)"
                     if d.get("ampel") == "gruen" else "") + "</b></p>")
+    elif knapp(d):
+        z.append(f"<p style='font-size:17px; color:{AMPEL['gelb']}'><b>Knapp: +{zahl(d['erwaermung_k'], 1)} K "
+                 f"(am Stecker {zahl(d['temp_max'], 1)} °C, erlaubt bis {zahl(d['temp_start'] + ERWAERMUNG_MAX_K, 1)} °C)"
+                 " und die Temperatur stieg noch – das Kabel überschreitet die +30 K wahrscheinlich. Widerstand "
+                 f"{zahl(d['kabel_mohm'], 0)} mΩ.</b></p>")
     elif zu_warm(d):
         # die Wärme entscheidet - ein guter Widerstand allein macht das Kabel nicht in Ordnung
         z.append(f"<p style='font-size:17px; color:{AMPEL['rot']}'><b>Nicht in Ordnung: zu warm "
@@ -264,13 +282,21 @@ def bericht_html(d: dict) -> str:
                                             "deiner Grenze abgebrochen."
                                             + (f" Nach Norm wäre erst über {zahl(soll, 0)} °C (Start + 30 K) zu "
                                                "warm." if soll else "")))
+        elif k is not None and knapp(d):
+            tab.append(("Erwärmung", f"<b style='color:{AMPEL['gelb']}'>? knapp</b>: +{zahl(k, 1)} K, erlaubt +30 K "
+                                     f"(am Stecker {zahl(d['temp_max'], 1)} °C, erlaubt bis "
+                                     f"{zahl(d['temp_start'] + ERWAERMUNG_MAX_K, 1)} °C) "
+                                     "– die Temperatur stieg beim Ende noch. Sie wird die Grenze wahrscheinlich "
+                                     "überschreiten. Für eine klare Aussage den Dauertest bis „stabil“ laufen lassen."))
         elif k is not None:
             ok = k <= ERWAERMUNG_MAX_K
             strom = d.get("pruef_a")
             voll = strom is None or strom >= d.get("nenn_a", 0) - 1e-6
             text = (f"<b style='color:{AMPEL['gruen' if ok else 'rot']}'>{'✔ bestanden' if ok else '✘ nicht bestanden'}"
-                    f"</b>: +{zahl(k, 1)} K, erlaubt höchstens +{zahl(ERWAERMUNG_MAX_K, 0)} K über der "
-                    "Raumtemperatur (USB Type-C Compliance Document, Prüfung B-6-1 / EIA-364-70)")
+                    f"</b>: +{zahl(k, 1)} K über der Raumtemperatur, erlaubt höchstens +{zahl(ERWAERMUNG_MAX_K, 0)} K "
+                    f"– am Stecker {zahl(d['temp_max'], 1)} °C, erlaubt bis "
+                    f"{zahl(d['temp_start'] + ERWAERMUNG_MAX_K, 1)} °C (USB Type-C Compliance Document, "
+                    "Prüfung B-6-1 / EIA-364-70)")
             if not voll:
                 text += (f"<br><span style='color:#c77700'>Geprüft mit {zahl(strom, 1)} A – die Norm prüft beim "
                          f"Nennstrom ({zahl(d['nenn_a'], 0)} A). Das Ergebnis gilt nur für {zahl(strom, 1)} A.</span>")
@@ -463,15 +489,15 @@ class KabelReiter(QWidget):
         self.alle_v.toggled.connect(lambda an: [hk.setEnabled(an) for _, hk in self.spannungen])
         for _, hk in self.spannungen:
             hk.setEnabled(False)
-        self.mit_dauer = QCheckBox("Dauertest bis stabil, höchstens Minuten:")
+        self.mit_dauer = QCheckBox("Dauertest bis stabil, mindestens Minuten:")
         self.mit_dauer.setToolTip("Erst bei Dauerlast wird ein Kabel warm. Endet, sobald die Temperatur stabil ist. "
                                   "Über den Trigger-Adapter nur einmal – bei der niedrigsten Spannung.")
         self.dauer_min = QSpinBox()
         self.dauer_min.setRange(1, 120)
         self.dauer_min.setValue(30)
-        self.dauer_min.setToolTip("Höchstens so lange. Endet früher, sobald die Temperatur stabil ist (nach "
-                                  "mindestens 10 Minuten, weniger als 0,5 °C Änderung in 5 Minuten) – so misst "
-                                  "auch die Norm.")
+        self.dauer_min.setToolTip("Geplante Dauer. Endet früher, sobald die Temperatur stabil ist (frühestens nach "
+                                  "10 Minuten, weniger als 0,5 °C Änderung in 5 Minuten). Steigt sie danach noch, "
+                                  "läuft der Test weiter bis stabil – höchstens 2 Stunden. So misst auch die Norm.")
         zeile = QHBoxLayout()
         zeile.addWidget(self.mit_dauer)
         zeile.addWidget(self.dauer_min)
@@ -1113,6 +1139,8 @@ class KabelReiter(QWidget):
             bewertung = {"gruen": "✔ in Ordnung", "gelb": "⚠ schwach", "rot": "✘ Schrott"}.get(ampel, "–")
             if zu_warm(d) or abgebrochen(d):
                 bewertung, ampel = "✘ zu heiß", "rot"
+            elif knapp(d) and ampel != "rot":
+                bewertung, ampel = "? knapp (Wärme)", "gelb"
             erg = angabe_pruefen(d)
             if erg:
                 # mit Angabe zählt, ob es die hält

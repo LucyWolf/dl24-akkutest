@@ -32,6 +32,7 @@ ZUSAMMENBRUCH = 0.5       # unter 50 % der Nennspannung gilt das Netzteil als au
 STABIL_MIN_S = 600.0
 STABIL_FENSTER_S = 300.0
 STABIL_K = 0.5
+STABIL_MAX_S = 2 * 3600.0   # "bis stabil" verlängert den Dauertest höchstens bis hierhin
 
 # Powerbanks
 PB_WARTEN_S = 90.0        # so lange auf Spannung warten (Knopf an der Powerbank drücken)
@@ -1073,6 +1074,15 @@ class NetzteilAblauf:
             r.temp_stabil = True
             self._werten_schritt()
             self._naechster(m)
+            return
+        if (im_schritt >= s.dauer_s and s.art == "dauer" and e.bis_stabil and not self._stabil(m)
+                and im_schritt < STABIL_MAX_S):
+            # das Ende zählt: noch nicht stabil - weiterlaufen statt mitten im Anstieg aufhören
+            if not getattr(self, "_verlaengert", False):
+                self._verlaengert = True
+                r.hinweise.append(f"Dauertest über die geplanten {dauer_kurz(s.dauer_s)} hinaus verlängert, weil die "
+                                  "Temperatur noch stieg")
+                self.bei_ereignis("info", "Temperatur noch nicht stabil – Dauertest läuft weiter")
             return
         if im_schritt >= s.dauer_s:
             if s.art == "kapazitaet":

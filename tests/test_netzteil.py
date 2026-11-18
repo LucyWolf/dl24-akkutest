@@ -430,6 +430,22 @@ def test_dauertest_bis_stabil():
         nt.STABIL_MIN_S, nt.STABIL_FENSTER_S = alt
 
 
+def test_dauertest_verlaengert_bis_stabil():
+    # Temperatur steigt noch, wenn die geplante Zeit um ist: weiterlaufen, bis sie stabil ist
+    alt = (nt.STABIL_MIN_S, nt.STABIL_FENSTER_S)
+    nt.STABIL_MIN_S, nt.STABIL_FENSTER_S = 60.0, 60.0
+    try:
+        q = SimNetzteil(5.0, innen_mohm=100, abschalt_a=9, heiz_c_je_w=4.0)   # erwärmt sich langsam (300 s)
+        e = nt.NetzteilEinstellung("Kabel", 5.0, 2.0, stufentest=False, dauertest=True, dauer_min=1,
+                                   bis_stabil=True, temp_grenze=90)
+        ab, _ = durchspielen(q, e, frist=90)
+        r = ab.ergebnis
+        assert r.temp_stabil and r.dauer_s > 120 and any("verlängert" in h for h in r.hinweise), (r.dauer_s,
+                                                                                                 r.hinweise)
+    finally:
+        nt.STABIL_MIN_S, nt.STABIL_FENSTER_S = alt
+
+
 def test_zu_hohe_spannung():
     q = SimNetzteil(5.6, innen_mohm=50, abschalt_a=9)
     e = nt.NetzteilEinstellung("Billig", 5.0, 1.0, stufen=2, stufe_s=10, dauertest=False, toleranz_proz=20)

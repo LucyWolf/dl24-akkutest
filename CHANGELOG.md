@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.66 – 18.11.2026
+
+- **Dauertest „bis stabil“ endet nicht mehr mitten im Anstieg:** Steigt die
+  Temperatur nach der geplanten Zeit noch, läuft er weiter bis stabil (höchstens
+  2 Stunden oder bis zur eigenen Grenze). Die Norm liest am stabilen Ende ab.
+- **„Knapp“ statt „bestanden“:** War die Temperatur beim Ende noch nicht
+  stabil und schon über 80 % der +30 K, steht dort „knapp – wird die Grenze
+  wahrscheinlich überschreiten“ (orange, „Hält die Angabe“ offen).
+- Erwärmung mit beiden Zahlen: Anstieg in K und die Temperatur am Stecker
+  samt erlaubter Höchsttemperatur (Start + 30 K).
+
 ## 1.0.65 – 18.11.2026
 
 - **Kabeltest: eigene Grenze „zu heiß ab“** (Vorgabe 60 °C): Erreicht das
