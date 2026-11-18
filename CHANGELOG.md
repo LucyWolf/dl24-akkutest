@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.70 – 18.11.2026
+
+- **Dauertest „bis stabil“ lief zu lange:** Stabil hieß bisher „höchster minus
+  tiefster Wert der letzten 5 Minuten unter 0,5 °C“. Ein einzelner Sprung des
+  Fühlers reichte, damit das nie zutraf – der Test lief weiter, obwohl die
+  Kurve längst flach war. Jetzt zählen wie bei EIA-364-70 drei Ablesungen
+  (Anfang, Mitte, Ende der 5 Minuten), jede als Mittel über eine Minute.
+
 ## 1.0.69 – 18.11.2026
 
 - **Kabeltest: „Strom höchstens“** – wie weit die App bei vorgegebener

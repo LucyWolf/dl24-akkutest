@@ -517,6 +517,19 @@ def test_kabel_bewerten():
     assert nt.kabel_bewerten(120, "") is None and nt.kabel_bewerten(0, "usbc3") is None
 
 
+def test_stabil_trotz_ausreissern():
+    """Einzelne Sprünge des Fühlers dürfen den Dauertest nicht endlos verlängern."""
+    from types import SimpleNamespace
+    import akkutest.netzteil as nt
+    punkte = []
+    for t in range(0, 900):
+        temp = 40.0 + (0.3 if t % 7 == 0 else 0.0) + (1.5 if t in (500, 700) else 0.0)
+        punkte.append((float(t), 0, 0, temp))
+    assert nt.NetzteilAblauf._stabil(SimpleNamespace(punkte=punkte), None)
+    steigend = [(float(t), 0, 0, 30.0 + t / 100) for t in range(900)]
+    assert not nt.NetzteilAblauf._stabil(SimpleNamespace(punkte=steigend), None)
+
+
 if __name__ == "__main__":
     for n, f in list(globals().items()):
         if n.startswith("test_"):

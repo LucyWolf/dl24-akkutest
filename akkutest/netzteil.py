@@ -1115,8 +1115,19 @@ class NetzteilAblauf:
     def _stabil(self, m: Messwert) -> bool:
         """Hat sich die Temperatur im letzten Fenster kaum noch geändert?"""
         t_jetzt = self.punkte[-1][0] if self.punkte else 0
-        fenster = [p[3] for p in self.punkte if p[3] is not None and p[0] >= t_jetzt - STABIL_FENSTER_S]
-        return len(fenster) >= 10 and max(fenster) - min(fenster) < STABIL_K
+        # Nicht Höchst- gegen Tiefstwert: ein einzelner Ausreißer des Fühlers hielte den Test sonst
+        # endlos am Laufen. Wie bei EIA-364-70 drei Ablesungen (Anfang, Mitte, Ende des Fensters),
+        # jede als Mittel über einen kurzen Block, damit das Rauschen herausfällt.
+        if not self.punkte or t_jetzt - self.punkte[0][0] < STABIL_FENSTER_S:
+            return False
+        block = min(60.0, STABIL_FENSTER_S / 5)
+        mittel = []
+        for von in (t_jetzt - STABIL_FENSTER_S, t_jetzt - STABIL_FENSTER_S / 2 - block / 2, t_jetzt - block):
+            werte = [p[3] for p in self.punkte if p[3] is not None and von <= p[0] <= von + block]
+            if len(werte) < 2:
+                return False
+            mittel.append(sum(werte) / len(werte))
+        return max(mittel) - min(mittel) < STABIL_K
 
     def _werten_schritt(self) -> None:
         s, e = self.schritt, self.einstellung
