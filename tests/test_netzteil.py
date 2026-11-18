@@ -446,6 +446,23 @@ def test_dauertest_verlaengert_bis_stabil():
         nt.STABIL_MIN_S, nt.STABIL_FENSTER_S = alt
 
 
+def test_dauertest_feste_leistung():
+    # 10 W bei sinkender Spannung: der Strom wird nachgeregelt, nie über die Grenze
+    q = SimNetzteil(5.0, innen_mohm=300, abschalt_a=9, heiz_c_je_w=0.0)
+    e = nt.NetzteilEinstellung("Kabel", 5.0, 2.0, stufentest=False, dauertest=True, dauer_min=1,
+                               ziel_w=10.0, ziel_max_a=2.4, temp_grenze=90)
+    ab, _ = durchspielen(q, e, frist=60)
+    p = [x for x in ab.punkte[-20:] if x[2] > 0.1]
+    w = sum(x[1] * x[2] for x in p) / len(p)
+    assert 9.7 < w < 10.3, w                                 # 2 A × 4,45 V wären nur 8,9 W
+    assert max(x[2] for x in ab.punkte) <= 2.4 + 0.01
+    # zu viel verlangt: gedeckelt und vermerkt
+    e2 = nt.NetzteilEinstellung("Kabel", 5.0, 2.0, stufentest=False, dauertest=True, dauer_min=1,
+                                ziel_w=20.0, ziel_max_a=2.4, temp_grenze=90)
+    ab2, _ = durchspielen(SimNetzteil(5.0, innen_mohm=300, abschalt_a=9, heiz_c_je_w=0.0), e2, frist=60)
+    assert any("nicht ganz erreicht" in h for h in ab2.ergebnis.hinweise), ab2.ergebnis.hinweise
+
+
 def test_zu_hohe_spannung():
     q = SimNetzteil(5.6, innen_mohm=50, abschalt_a=9)
     e = nt.NetzteilEinstellung("Billig", 5.0, 1.0, stufen=2, stufe_s=10, dauertest=False, toleranz_proz=20)

@@ -262,7 +262,11 @@ def bericht_html(d: dict) -> str:
     if b:
         from .fenster import dauer_text
         tab.append(("Geprüft mit", f"höchstens <b>{zahl(b['max_w'], 1)} W</b> ({zahl(b['max_a'], 2)} A bei "
-                                   f"{zahl(b['bei_v'], 2)} V) · Dauer <b>{dauer_text(b['dauer_s'])}</b>"))
+                                   f"{zahl(b['bei_v'], 2)} V) · Dauer <b>{dauer_text(b['dauer_s'])}</b>"
+                                   + (f" · Dauertest auf <b>{zahl(d['ziel_w'], 0)} W</b> geregelt (Strom laufend "
+                                      "an die Spannung angepasst)" if d.get("ziel_w") else "")))
+    for h in d.get("hinweise") or []:
+        tab.append(("", f"<span style='color:gray'>{html.escape(h)}</span>"))
     if d.get("ohne_referenz"):
         tab.append(("", "<span style='color:#c77700'>ohne Referenzmessung – der Wert enthält auch den Widerstand "
                         "des Netzteils und ist daher etwas zu hoch</span>"))
@@ -778,7 +782,9 @@ class KabelReiter(QWidget):
             return nt.NetzteilEinstellung("Referenz ohne Kabel", 5.0, a, stufen=4, stufe_s=10, dauertest=False,
                                           abschalttest=False, fuehler=self.mit_fuehler.isChecked(),
                                           temp_grenze=NOTAUS_C)
+        nenn = nt.KABEL_TYPEN[self.typ.currentData()][2]
         return nt.NetzteilEinstellung(self.name.text().strip() or "Kabel", 5.0, a, stufen=5, stufe_s=15,
+                                      ziel_w=self.leistung.value(), ziel_max_a=nenn if self.leistung.value() else 0.0,
                                       dauertest=self.mit_dauer.isChecked(), dauer_proz=100, bis_stabil=True,
                                       dauer_min=self.dauer_min.value(), abschalttest=False,
                                       fuehler=self.mit_fuehler.isChecked(), temp_grenze=NOTAUS_C)
@@ -1071,6 +1077,8 @@ class KabelReiter(QWidget):
         d["angabe_w"] = self.angabe.currentData() or 0
         d["temp_grenze"] = self.temp_grenze.value()
         d["notaus"] = r.zu_heiss
+        d["ziel_w"] = self.leistung.value()
+        d["hinweise"] = list(r.hinweise)
         d.update(name=self.name.text().strip(), wann=time.time(), zu_heiss=r.zu_heiss,
                  kurve=[list(p) for p in nt.duennen(ab.punkte, 600)])
         self._zeigen(d)
@@ -1157,6 +1165,8 @@ class KabelReiter(QWidget):
         d["temp_grenze"] = self.temp_grenze.value()
         d["zu_heiss"] = any(t["ergebnis"].get("zu_heiss") for t in ab.ergebnis.teile)
         d["notaus"] = d["zu_heiss"]
+        d["ziel_w"] = self.leistung.value()
+        d["hinweise"] = [h for t in ab.ergebnis.teile for h in t["ergebnis"].get("hinweise") or []]
         d.update(name=self.name.text().strip(), wann=time.time(), je_spannung=je, fehlt=fehlt,
                  pruef_a=self.strom.value(), kurve=[list(p) for p in nt.duennen(ab.punkte, 900)])
         self._zeigen(d)

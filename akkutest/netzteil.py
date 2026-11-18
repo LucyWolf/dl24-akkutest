@@ -32,6 +32,8 @@ ZUSAMMENBRUCH = 0.5       # unter 50 % der Nennspannung gilt das Netzteil als au
 STABIL_MIN_S = 600.0
 STABIL_FENSTER_S = 300.0
 STABIL_K = 0.5
+REGEL_S = 2.0               # feste Leistung: höchstens so oft den Strom nachstellen
+REGEL_ANTEIL = 0.01         # ... und nur, wenn er um mehr als 1 % daneben liegt
 STABIL_MAX_S = 2 * 3600.0   # "bis stabil" verlängert den Dauertest höchstens bis hierhin
 
 # Powerbanks
@@ -129,6 +131,8 @@ class NetzteilEinstellung:
     nenn_mah_aus: float = 0.0  # "Rated capacity" vom Aufdruck: was neu am Ausgang (5 V) herauskommt
     kabel_raus: bool = False   # vom Nutzer gewählt: Kabel herausrechnen, bewertet wird an der Buchse
     bis_stabil: bool = False   # Dauertest endet, wenn die Temperatur sich nicht mehr ändert (EIA-364-70)
+    ziel_w: float = 0.0        # Dauertest mit fester Leistung: Strom wird laufend nachgeregelt (0 = aus)
+    ziel_max_a: float = 0.0    # ... dabei nie mehr als dieser Strom
 
     @property
     def neu_wh(self) -> tuple[float, bool]:
@@ -1018,6 +1022,22 @@ class NetzteilAblauf:
         # Netzteil aus? Spannung weg oder Last vom Gerät abgeschaltet
         weg = m.spannung < e.nenn_v * ZUSAMMENBRUCH or (not m.an and m.strom <= STROM_AUS)
         self._aus = self._aus + 1 if weg else 0
+        # Feste Leistung: Strom an die gemessene Spannung anpassen, damit die Watt stimmen
+        if e.ziel_w > 0 and s.art == "dauer" and not weg and m.spannung > 0.5 and \
+                m.zeit - getattr(self, "_regel_t", 0.0) >= REGEL_S:
+            grenze = e.ziel_max_a or s.soll_a
+            soll = round(min(e.ziel_w / m.spannung, grenze, DL24_MAX_W / m.spannung * 0.98), 3)
+            if abs(soll - s.soll_a) > s.soll_a * REGEL_ANTEIL:
+                self._regel_t = m.zeit
+                s.soll_a = soll
+                self.geraet.strom_setzen(soll)
+                if soll >= grenze - 1e-6 and e.ziel_w / m.spannung > grenze + 1e-6 and \
+                        not getattr(self, "_regel_gedeckelt", False):
+                    self._regel_gedeckelt = True
+                    r.hinweise.append(f"Leistung {_k(e.ziel_w, 0)} W nicht ganz erreicht: Der Strom ist auf "
+                                      f"{_k(grenze, 2)} A begrenzt (bei {_k(m.spannung, 2)} V bräuchte es "
+                                      f"{_k(e.ziel_w / m.spannung, 2)} A)")
+                return                            # neuer Sollwert - erst wieder einschwingen
         # Kommt der Strom nicht an, liefert das Netzteil ihn nicht
         zu_wenig = m.strom < s.soll_a * 0.9 - 0.01
         self._zu_wenig = self._zu_wenig + 1 if zu_wenig and not weg else 0

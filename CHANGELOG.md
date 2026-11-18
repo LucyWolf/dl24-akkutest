@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.68 – 18.11.2026
+
+- **Kabeltest mit fester Leistung:** Ist „oder Leistung“ gesetzt, regelt die
+  App im Dauertest den Strom laufend nach (Strom = Leistung ÷ gemessene
+  Spannung, höchstens alle 2 s, nur bei mehr als 1 % Abweichung), damit die
+  eingestellten Watt anliegen – nie über dem Nennstrom des Kabeltyps und den
+  150 W des DL24. Reicht der erlaubte Strom nicht, steht das im Bericht.
+
 ## 1.0.67 – 18.11.2026
 
 **Kabeltest**
