@@ -591,7 +591,10 @@ def test_kabeltester():
     for v, h in kt.spannungen:
         h.setChecked(v in (5.0, 20.0))
     kt.leistung.setValue(60)
+    assert kt.max_a.value() == 3.0                    # Vorgabe: Nennstrom
     assert kt.strom_fuer(20.0) == (3.0, False) and kt.strom_fuer(5.0) == (3.0, True)
+    kt.max_a.setValue(3.3)                            # bewusst etwas Überlast erlaubt
+    assert kt.strom_fuer(19.4)[0] == 3.09
     assert "gedeckelt" in kt.leistung_hinweis.text() and not kt.strom.isEnabled()
     kt.leistung.setValue(0)
     kt.alle_v.setChecked(False)

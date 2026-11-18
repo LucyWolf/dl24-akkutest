@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.69 – 18.11.2026
+
+- **Kabeltest: „Strom höchstens“** – wie weit die App bei vorgegebener
+  Leistung gehen darf. Vorgabe ist der Nennstrom des Kabeltyps; mehr (bis 5 A)
+  muss bewusst eingestellt werden. Wurde über dem Nennstrom geprüft, steht im
+  Bericht „leicht überlastet“.
+
 ## 1.0.68 – 18.11.2026
 
 - **Kabeltest mit fester Leistung:** Ist „oder Leistung“ gesetzt, regelt die

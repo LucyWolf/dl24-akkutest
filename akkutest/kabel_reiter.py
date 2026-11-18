@@ -264,7 +264,10 @@ def bericht_html(d: dict) -> str:
         tab.append(("Geprüft mit", f"höchstens <b>{zahl(b['max_w'], 1)} W</b> ({zahl(b['max_a'], 2)} A bei "
                                    f"{zahl(b['bei_v'], 2)} V) · Dauer <b>{dauer_text(b['dauer_s'])}</b>"
                                    + (f" · Dauertest auf <b>{zahl(d['ziel_w'], 0)} W</b> geregelt (Strom laufend "
-                                      "an die Spannung angepasst)" if d.get("ziel_w") else "")))
+                                      "an die Spannung angepasst)" if d.get("ziel_w") else "")
+                                   + (f"<br><span style='color:#c77700'>Geprüft mit bis zu {zahl(b['max_a'], 2)} A – über "
+                                      f"dem Nennstrom des Kabels ({zahl(d['nenn_a'], 0)} A), also leicht überlastet."
+                                      "</span>" if b["max_a"] > d.get("nenn_a", 99) + 0.02 else "")))
     for h in d.get("hinweise") or []:
         tab.append(("", f"<span style='color:gray'>{html.escape(h)}</span>"))
     if d.get("ohne_referenz"):
@@ -490,6 +493,16 @@ class KabelReiter(QWidget):
                                  "über 150 W.")
         self.leistung.valueChanged.connect(self._leistung_zeigen)
         f.addRow("oder Leistung:", self.leistung)
+        self.max_a = QDoubleSpinBox()
+        self.max_a.setRange(0.5, 5.0)
+        self.max_a.setDecimals(2)
+        self.max_a.setSingleStep(0.1)
+        self.max_a.setSuffix(" A")
+        self.max_a.setToolTip("Bis zu diesem Strom darf die App gehen, um die Leistung zu erreichen. Vorgabe: "
+                              "der Nennstrom des Kabeltyps. Über dem Nennstrom wird das Kabel leicht überlastet – "
+                              "das steht dann im Bericht. Mehr als 5 A gibt es bei USB-C nicht.")
+        f.addRow("Strom höchstens:", self.max_a)
+        self.max_a.valueChanged.connect(self._leistung_zeigen)
         self.leistung_hinweis = QLabel()
         self.leistung_hinweis.setWordWrap(True)
         self.leistung_hinweis.setStyleSheet(gedaempft())
@@ -726,7 +739,11 @@ class KabelReiter(QWidget):
         self._typ_gewaehlt()
 
     def _typ_gewaehlt(self, *_) -> None:
-        self.strom.setValue(nt.KABEL_TYPEN[self.typ.currentData()][2])
+        nenn = nt.KABEL_TYPEN[self.typ.currentData()][2]
+        self.strom.setValue(nenn)
+        if hasattr(self, "max_a"):
+            # Vorgabe: Nennstrom - mehr ist eine Überlast und muss bewusst eingestellt werden
+            self.max_a.setValue(nenn)
 
     def _angabe_gewaehlt(self, *_) -> None:
         w = self.angabe.currentData()
@@ -784,7 +801,8 @@ class KabelReiter(QWidget):
                                           temp_grenze=NOTAUS_C)
         nenn = nt.KABEL_TYPEN[self.typ.currentData()][2]
         return nt.NetzteilEinstellung(self.name.text().strip() or "Kabel", 5.0, a, stufen=5, stufe_s=15,
-                                      ziel_w=self.leistung.value(), ziel_max_a=nenn if self.leistung.value() else 0.0,
+                                      ziel_w=self.leistung.value(),
+                                      ziel_max_a=self.max_a.value() if self.leistung.value() else 0.0,
                                       dauertest=self.mit_dauer.isChecked(), dauer_proz=100, bis_stabil=True,
                                       dauer_min=self.dauer_min.value(), abschalttest=False,
                                       fuehler=self.mit_fuehler.isChecked(), temp_grenze=NOTAUS_C)
@@ -792,14 +810,14 @@ class KabelReiter(QWidget):
     def strom_fuer(self, volt: float) -> tuple[float, bool]:
         """Prüfstrom bei dieser Spannung - aus der Leistung, wenn eine vorgegeben ist.
         (Strom, gedeckelt?) - nie über dem Nennstrom des Kabeltyps und den 150 W des DL24."""
-        nenn = nt.KABEL_TYPEN[self.typ.currentData()][2]
+        grenze = self.max_a.value()
         dl24 = nt.DL24_MAX_W / volt * 0.98
         w = self.leistung.value()
         if not w:
             a = min(self.strom.value(), dl24)
             return round(a, 2), a < self.strom.value() - 1e-6
         a = w / volt
-        return round(min(a, nenn, dl24), 2), a > min(nenn, dl24) + 1e-6
+        return round(min(a, grenze, dl24), 2), a > min(grenze, dl24) + 1e-6
 
     def _leistung_zeigen(self, *_) -> None:
         w = self.leistung.value()
@@ -812,8 +830,9 @@ class KabelReiter(QWidget):
         for v in volt:
             a, gedeckelt = self.strom_fuer(v)
             teile.append(f"{v:g} V: {a:.2f} A ({a * v:.0f} W)".replace(".", ",") + (" ⚠ gedeckelt" if gedeckelt else ""))
-        self.leistung_hinweis.setText(" · ".join(teile) + ("  –  gedeckelt heißt: mehr Strom verträgt der Kabeltyp "
-                                                           "nicht" if any("gedeckelt" in x for x in teile) else ""))
+        self.leistung_hinweis.setText(" · ".join(teile) + (f"  –  gedeckelt heißt: mehr als {self.max_a.value():.2f} A "
+                                                           "sind eingestellt nicht erlaubt"
+                                                           if any("gedeckelt" in x for x in teile) else ""))
 
     def _volt(self) -> list[float]:
         return [v for v, h in self.spannungen if h.isChecked()] if self.alle_v.isChecked() else []
